@@ -1,0 +1,5 @@
+{
+  "name": "IP Manager & Formatter",
+  "description": "A tool to manage IP addresses, ports, and regions with drag-and-drop sorting, batch import, and custom format copying.",
+  "requestFramePermissions": []
+}
