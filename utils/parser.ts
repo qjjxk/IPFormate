@@ -35,8 +35,8 @@ const parseCompactEntry = (text: string): IpEntry | null => {
   if (!ip || !port || isNaN(Number(port))) return null;
 
   // If region is provided in string (e.g. #🇺🇸), use it. 
-  // If not, default to flag.
-  const region = regionRaw ? (REGION_MAP[regionRaw.toUpperCase()] || regionRaw) : '🏳️';
+  // If not, default to empty string.
+  const region = regionRaw ? (REGION_MAP[regionRaw.toUpperCase()] || regionRaw) : '';
 
   return {
       id: uuidv4(),
@@ -55,7 +55,7 @@ const parseTableEntry = (line: string): IpEntry | null => {
     if (parts.length >= 2) {
       const ip = parts[0];
       let port = parts[parts.length - 1];
-      let region = '🏳️';
+      let region = '';
 
       // Logic specifically for the provided table format (8 columns)
       if (parts.length >= 8) {

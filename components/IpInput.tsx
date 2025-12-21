@@ -40,7 +40,7 @@ export const IpInput: React.FC<IpInputProps> = ({ onAdd, existingEntries }) => {
       id: uuidv4(),
       ip: singleIp,
       port: singlePort,
-      region: singleRegion || '🏳️',
+      region: singleRegion,
       active: true
     }]);
 

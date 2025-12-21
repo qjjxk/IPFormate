@@ -50,8 +50,8 @@ export default function App() {
       // Format: 23.106.143.6:443,8.209.232.49:8443
       text = activeEntries.map(e => `${e.ip}:${e.port}`).join(',');
     } else {
-      // Format: 23.106.143.6:443#🇺🇸,3.113.105.32:443#🇯🇵
-      text = activeEntries.map(e => `${e.ip}:${e.port}#${e.region}`).join(',');
+      // Format: 23.106.143.6:443#🇺🇸 or 23.106.143.6:443 (if no region)
+      text = activeEntries.map(e => `${e.ip}:${e.port}${e.region ? '#' + e.region : ''}`).join(',');
     }
 
     try {
@@ -106,7 +106,7 @@ export default function App() {
                 {copiedType === 'region' ? <CheckCircle2 className="text-green-500" /> : <Copy size={18} />}
                 <span className="font-semibold">复制格式二 (含地区)</span>
                 <span className="absolute -bottom-6 text-[10px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                    IP:Port#Region,IP:Port#Region...
+                    IP:Port#Region,IP:Port...
                 </span>
             </button>
             </div>
