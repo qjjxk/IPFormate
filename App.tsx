@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { IpEntry } from './types';
 import { IpInput } from './components/IpInput';
 import { IpList } from './components/IpList';
-import { Copy, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { Copy, CheckCircle2, ShieldCheck, ListFilter } from 'lucide-react';
 
 const STORAGE_KEY = 'ip-manager-data';
 
 export default function App() {
   const [entries, setEntries] = useState<IpEntry[]>([]);
   const [copiedType, setCopiedType] = useState<'simple' | 'region' | null>(null);
+  const [includeInactive, setIncludeInactive] = useState(false);
 
   // Load from local storage
   useEffect(() => {
@@ -39,19 +40,20 @@ export default function App() {
 
   const copyToClipboard = async (type: 'simple' | 'region') => {
     let text = '';
-    const activeEntries = entries.filter(e => e.active);
+    // Determine which entries to copy based on the toggle
+    const targetEntries = includeInactive ? entries : entries.filter(e => e.active);
 
-    if (activeEntries.length === 0) {
-        alert("没有选中的可用 IP");
+    if (targetEntries.length === 0) {
+        alert(includeInactive ? "列表为空" : "没有选中的可用 IP");
         return;
     }
     
     if (type === 'simple') {
       // Format: 23.106.143.6:443,8.209.232.49:8443
-      text = activeEntries.map(e => `${e.ip}:${e.port}`).join(',');
+      text = targetEntries.map(e => `${e.ip}:${e.port}`).join(',');
     } else {
       // Format: 23.106.143.6:443#🇺🇸 or 23.106.143.6:443 (if no region)
-      text = activeEntries.map(e => `${e.ip}:${e.port}${e.region ? '#' + e.region : ''}`).join(',');
+      text = targetEntries.map(e => `${e.ip}:${e.port}${e.region ? '#' + e.region : ''}`).join(',');
     }
 
     try {
@@ -85,30 +87,51 @@ export default function App() {
         <IpInput onAdd={handleAdd} existingEntries={entries} />
 
         {entries.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <button
-                type="button"
-                onClick={() => copyToClipboard('simple')}
-                className="group relative flex items-center justify-center space-x-2 w-full px-4 py-4 bg-white border-2 border-slate-200 hover:border-blue-500 text-slate-700 hover:text-blue-600 rounded-xl transition-all shadow-sm active:scale-[0.98]"
-            >
-                {copiedType === 'simple' ? <CheckCircle2 className="text-green-500" /> : <Copy size={18} />}
-                <span className="font-semibold">复制格式一 (无地区)</span>
-                <span className="absolute -bottom-6 text-[10px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                    IP:Port,IP:Port...
-                </span>
-            </button>
-            
-            <button
-                type="button"
-                onClick={() => copyToClipboard('region')}
-                className="group relative flex items-center justify-center space-x-2 w-full px-4 py-4 bg-white border-2 border-slate-200 hover:border-blue-500 text-slate-700 hover:text-blue-600 rounded-xl transition-all shadow-sm active:scale-[0.98]"
-            >
-                {copiedType === 'region' ? <CheckCircle2 className="text-green-500" /> : <Copy size={18} />}
-                <span className="font-semibold">复制格式二 (含地区)</span>
-                <span className="absolute -bottom-6 text-[10px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                    IP:Port#Region,IP:Port...
-                </span>
-            </button>
+            <div className="mb-6">
+                <div className="flex justify-end mb-3">
+                    <label className="flex items-center space-x-2 text-sm text-slate-600 cursor-pointer select-none bg-white px-3 py-1.5 rounded-full border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors">
+                        <input
+                            type="checkbox"
+                            checked={includeInactive}
+                            onChange={(e) => setIncludeInactive(e.target.checked)}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 border-gray-300"
+                        />
+                        <span className="flex items-center font-medium">
+                            <ListFilter size={14} className="mr-1.5" />
+                            包含未启用节点 ({includeInactive ? entries.length : entries.filter(e => e.active).length})
+                        </span>
+                    </label>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <button
+                        type="button"
+                        onClick={() => copyToClipboard('simple')}
+                        className="group relative flex items-center justify-center space-x-2 w-full px-4 py-4 bg-white border-2 border-slate-200 hover:border-blue-500 text-slate-700 hover:text-blue-600 rounded-xl transition-all shadow-sm active:scale-[0.98]"
+                    >
+                        {copiedType === 'simple' ? <CheckCircle2 className="text-green-500" /> : <Copy size={18} />}
+                        <span className="font-semibold">
+                            {includeInactive ? "复制全部 (格式一)" : "复制选中 (格式一)"}
+                        </span>
+                        <span className="absolute -bottom-6 text-[10px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                            IP:Port,IP:Port...
+                        </span>
+                    </button>
+                    
+                    <button
+                        type="button"
+                        onClick={() => copyToClipboard('region')}
+                        className="group relative flex items-center justify-center space-x-2 w-full px-4 py-4 bg-white border-2 border-slate-200 hover:border-blue-500 text-slate-700 hover:text-blue-600 rounded-xl transition-all shadow-sm active:scale-[0.98]"
+                    >
+                        {copiedType === 'region' ? <CheckCircle2 className="text-green-500" /> : <Copy size={18} />}
+                        <span className="font-semibold">
+                            {includeInactive ? "复制全部 (格式二)" : "复制选中 (格式二)"}
+                        </span>
+                        <span className="absolute -bottom-6 text-[10px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                            IP:Port#Region,IP:Port...
+                        </span>
+                    </button>
+                </div>
             </div>
         )}
 
