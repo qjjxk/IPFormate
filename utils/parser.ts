@@ -18,6 +18,11 @@ const REGION_MAP: Record<string, string> = {
   'TW': '🇹🇼',
   'TPE': '🇹🇼',
   'CN': '🇨🇳',
+  'UK': '🇬🇧',
+  'GB': '🇬🇧',
+  'DE': '🇩🇪',
+  'FR': '🇫🇷',
+  'CA': '🇨🇦',
 };
 
 const parseCompactEntry = (text: string): IpEntry | null => {
@@ -29,14 +34,12 @@ const parseCompactEntry = (text: string): IpEntry | null => {
   const lastColon = ipPort.lastIndexOf(':');
   if (lastColon === -1) return null;
   
-  const ip = ipPort.substring(0, lastColon);
-  const port = ipPort.substring(lastColon + 1);
+  const ip = ipPort.substring(0, lastColon).trim();
+  const port = ipPort.substring(lastColon + 1).trim();
   
   if (!ip || !port || isNaN(Number(port))) return null;
 
-  // If region is provided in string (e.g. #🇺🇸), use it. 
-  // If not, default to empty string.
-  const region = regionRaw ? (REGION_MAP[regionRaw.toUpperCase()] || regionRaw) : '';
+  const region = regionRaw ? (REGION_MAP[regionRaw.trim().toUpperCase()] || regionRaw.trim()) : '';
 
   return {
       id: uuidv4(),
@@ -44,6 +47,35 @@ const parseCompactEntry = (text: string): IpEntry | null => {
       port,
       region,
       active: true
+  };
+};
+
+const parsePipeEntry = (line: string): IpEntry | null => {
+  // Format: 150.230.204.21:10243 | JP | Inzai | 0ms
+  const parts = line.split('|').map(p => p.trim());
+  if (parts.length < 1) return null;
+
+  const ipPortPart = parts[0];
+  const lastColon = ipPortPart.lastIndexOf(':');
+  if (lastColon === -1) return null;
+
+  const ip = ipPortPart.substring(0, lastColon).trim();
+  const port = ipPortPart.substring(lastColon + 1).trim();
+  
+  if (!ip || !port || isNaN(Number(port))) return null;
+
+  let region = '';
+  if (parts.length >= 2) {
+    const regionCode = parts[1].toUpperCase();
+    region = REGION_MAP[regionCode] || parts[1];
+  }
+
+  return {
+    id: uuidv4(),
+    ip,
+    port,
+    region,
+    active: true
   };
 };
 
@@ -95,32 +127,34 @@ export const parseBatchInput = (text: string): IpEntry[] => {
       continue;
     }
 
-    // Check for comma separated values first
+    // New Priority: Pipe format (|)
+    if (trimmed.includes('|')) {
+      const entry = parsePipeEntry(trimmed);
+      if (entry) {
+        entries.push(entry);
+        continue;
+      }
+    }
+
+    // Comma separated values
     if (trimmed.includes(',')) {
         const parts = trimmed.split(',');
         for (const part of parts) {
             const cleanPart = part.trim();
             if (!cleanPart) continue;
-            // Recursively try to parse chunks
-            // A chunk in CSV implies compact format, not table format
             const entry = parseCompactEntry(cleanPart);
             if (entry) entries.push(entry);
         }
     } else {
-        // No commas. 
-        // If it has spaces/tabs, it's likely a table row or "IP Port"
-        // If it has no spaces, it might be a single "IP:Port" or "IP:Port#Region" on a new line
-        
+        // Table or Compact
         if (trimmed.includes(' ') || trimmed.includes('\t')) {
              const entry = parseTableEntry(trimmed);
              if (entry) entries.push(entry);
         } else {
-             // Try compact first
              const entry = parseCompactEntry(trimmed);
              if (entry) {
                  entries.push(entry);
              } else {
-                 // Fallback to table parser just in case (e.g. edge case weird spacing)
                  const tableEntry = parseTableEntry(trimmed);
                  if (tableEntry) entries.push(tableEntry);
              }
