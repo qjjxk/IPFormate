@@ -40,7 +40,6 @@ const RowContent = ({ entry, onRemove, onUpdate, isOverlay, attributes, listener
   return (
     <>
       <td className="pl-6 pr-1 py-5 w-14 text-center">
-        {/* 关键修复：确保 attributes 和 listeners 展开到此元素 */}
         <div 
           {...attributes}
           {...listeners}
@@ -131,6 +130,7 @@ const SortableRow = memo(({ entry, onRemove, onUpdate }: SortableRowProps) => {
   } = useSortable({ id: entry.id });
 
   const style = {
+    // 强制同步位置，移除动画延迟
     transform: CSS.Translate.toString(transform),
     transition: isDragging ? 'none' : transition,
     zIndex: isDragging ? 50 : 'auto',
@@ -171,7 +171,7 @@ export const IpList: React.FC<IpListProps> = ({ entries, setEntries }) => {
   const sensors = useSensors(
     useSensor(PointerSensor, { 
       activationConstraint: { 
-        distance: 4 // 设定最小移动距离触发拖拽，防止干扰普通点击
+        distance: 3 // 极短的触发距离，让响应更灵敏
       } 
     }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -229,17 +229,19 @@ export const IpList: React.FC<IpListProps> = ({ entries, setEntries }) => {
             </tbody>
           </table>
 
-          <DragOverlay dropAnimation={{
-            duration: 200,
-            easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)',
-            sideEffects: defaultDropAnimationSideEffects({
-              styles: {
-                active: {
-                  opacity: '0.4',
+          <DragOverlay 
+            dropAnimation={{
+              duration: 200,
+              easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)',
+              sideEffects: defaultDropAnimationSideEffects({
+                styles: {
+                  active: {
+                    opacity: '0.4',
+                  },
                 },
-              },
-            }),
-          }}>
+              }),
+            }}
+          >
             {activeEntry ? (
               <table className="min-w-full table-fixed bg-white shadow-2xl ring-2 ring-indigo-500 rounded-xl overflow-hidden pointer-events-none opacity-95">
                 <tbody>
