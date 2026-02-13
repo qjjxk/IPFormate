@@ -28,10 +28,11 @@ interface RowContentProps {
   onRemove?: (id: string) => void;
   onUpdate?: (id: string, field: keyof IpEntry, value: any) => void;
   isOverlay?: boolean;
-  dragHandleProps?: any; // 新增：用于接收拖拽事件
+  attributes?: any;
+  listeners?: any;
 }
 
-const RowContent = ({ entry, onRemove, onUpdate, isOverlay, dragHandleProps }: RowContentProps) => {
+const RowContent = ({ entry, onRemove, onUpdate, isOverlay, attributes, listeners }: RowContentProps) => {
   const isIdentifying = entry.region === '识别中...';
   const isPending = !entry.region || entry.region === '待识别';
   const isUnknown = entry.region === '未知' || entry.region === 'FAIL';
@@ -39,10 +40,11 @@ const RowContent = ({ entry, onRemove, onUpdate, isOverlay, dragHandleProps }: R
   return (
     <>
       <td className="pl-6 pr-1 py-5 w-14 text-center">
-        {/* 关键修复：将 dragHandleProps 绑定到此 div */}
+        {/* 关键修复：确保 attributes 和 listeners 展开到此元素 */}
         <div 
-          {...dragHandleProps} 
-          className="text-slate-300 hover:text-indigo-500 cursor-grab active:cursor-grabbing p-1.5 rounded-lg transition-colors touch-none"
+          {...attributes}
+          {...listeners}
+          className="text-slate-300 hover:text-indigo-500 cursor-grab active:cursor-grabbing p-1.5 rounded-lg transition-colors touch-none inline-flex items-center justify-center"
         >
           <GripVertical size={18} />
         </div>
@@ -54,7 +56,7 @@ const RowContent = ({ entry, onRemove, onUpdate, isOverlay, dragHandleProps }: R
             checked={entry.active}
             onChange={(e) => !isOverlay && onUpdate?.(entry.id, 'active', e.target.checked)}
             className="w-5 h-5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 transition-all cursor-pointer"
-            onClick={(e) => e.stopPropagation()} // 防止触发拖拽
+            onClick={(e) => e.stopPropagation()} 
           />
           <span className="text-[13px] font-bold text-slate-500 whitespace-nowrap select-none">启用</span>
         </div>
@@ -129,19 +131,19 @@ const SortableRow = memo(({ entry, onRemove, onUpdate }: SortableRowProps) => {
   } = useSortable({ id: entry.id });
 
   const style = {
-    // 使用 Translate 代替 Transform 以获得更好的跟随性能
     transform: CSS.Translate.toString(transform),
     transition: isDragging ? 'none' : transition,
     zIndex: isDragging ? 50 : 'auto',
+    position: 'relative' as const,
   };
 
   return (
     <tr
       ref={setNodeRef}
       style={style}
-      className={`group transition-all border-b border-slate-50 last:border-0 ${
+      className={`group border-b border-slate-50 last:border-0 ${
         isDragging 
-          ? 'opacity-30 bg-indigo-50/50' // 拖拽时原位置变淡
+          ? 'opacity-20 bg-indigo-50/50' 
           : 'bg-white hover:bg-indigo-50/20'
       } ${!entry.active && !isDragging ? 'opacity-30' : ''}`}
     >
@@ -149,7 +151,8 @@ const SortableRow = memo(({ entry, onRemove, onUpdate }: SortableRowProps) => {
         entry={entry} 
         onRemove={onRemove} 
         onUpdate={onUpdate} 
-        dragHandleProps={{...attributes, ...listeners}} 
+        attributes={attributes}
+        listeners={listeners}
       />
     </tr>
   );
@@ -168,7 +171,7 @@ export const IpList: React.FC<IpListProps> = ({ entries, setEntries }) => {
   const sensors = useSensors(
     useSensor(PointerSensor, { 
       activationConstraint: { 
-        distance: 2 // 非常灵敏的响应距离
+        distance: 4 // 设定最小移动距离触发拖拽，防止干扰普通点击
       } 
     }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -226,11 +229,21 @@ export const IpList: React.FC<IpListProps> = ({ entries, setEntries }) => {
             </tbody>
           </table>
 
-          <DragOverlay dropAnimation={null}>
+          <DragOverlay dropAnimation={{
+            duration: 200,
+            easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)',
+            sideEffects: defaultDropAnimationSideEffects({
+              styles: {
+                active: {
+                  opacity: '0.4',
+                },
+              },
+            }),
+          }}>
             {activeEntry ? (
-              <table className="min-w-full table-fixed bg-white shadow-2xl ring-2 ring-indigo-500 rounded-xl overflow-hidden pointer-events-none opacity-90">
+              <table className="min-w-full table-fixed bg-white shadow-2xl ring-2 ring-indigo-500 rounded-xl overflow-hidden pointer-events-none opacity-95">
                 <tbody>
-                  <tr className="bg-indigo-50/50">
+                  <tr className="bg-white">
                     <RowContent entry={activeEntry} isOverlay />
                   </tr>
                 </tbody>
