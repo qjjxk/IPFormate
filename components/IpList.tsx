@@ -20,7 +20,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToVerticalAxis, restrictToWindowEdges } from '@dnd-kit/modifiers';
-import { GripVertical, Trash2, MapPin, Hash, Globe, CheckCircle2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { GripVertical, Trash2, MapPin, Hash, Globe, CheckCircle2, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
 import { IpEntry } from '../types';
 
 const ITEMS_PER_PAGE = 10;
@@ -38,25 +38,33 @@ const RowContent = ({ entry, onRemove, onUpdate, isOverlay, attributes, listener
   const isIdentifying = entry.region === '识别中...';
   const isPending = !entry.region || entry.region === '待识别';
   const isUnknown = entry.region === '未知' || entry.region === 'FAIL';
+  const isLocked = entry.isLocked;
 
   return (
     <>
       <td className="pl-6 pr-1 py-5 w-14 text-center">
-        <div 
-          {...attributes}
-          {...listeners}
-          className="text-slate-300 hover:text-indigo-500 cursor-grab active:cursor-grabbing p-1.5 rounded-lg transition-colors touch-none inline-flex items-center justify-center"
-        >
-          <GripVertical size={18} />
-        </div>
+        {!isLocked ? (
+          <div 
+            {...attributes}
+            {...listeners}
+            className="text-slate-300 hover:text-indigo-500 cursor-grab active:cursor-grabbing p-1.5 rounded-lg transition-colors touch-none inline-flex items-center justify-center"
+          >
+            <GripVertical size={18} />
+          </div>
+        ) : (
+          <div className="text-slate-200 p-1.5 inline-flex items-center justify-center">
+            <Lock size={16} />
+          </div>
+        )}
       </td>
       <td className="px-4 py-5 w-36">
         <div className="flex items-center space-x-2.5 justify-center">
           <input 
             type="checkbox"
             checked={entry.active}
-            onChange={(e) => !isOverlay && onUpdate?.(entry.id, 'active', e.target.checked)}
-            className="w-5 h-5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 transition-all cursor-pointer"
+            disabled={isLocked}
+            onChange={(e) => !isOverlay && !isLocked && onUpdate?.(entry.id, 'active', e.target.checked)}
+            className={`w-5 h-5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 transition-all ${isLocked ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
             onClick={(e) => e.stopPropagation()} 
           />
           <span className="text-[13px] font-bold text-slate-500 whitespace-nowrap select-none">启用</span>
@@ -66,9 +74,10 @@ const RowContent = ({ entry, onRemove, onUpdate, isOverlay, attributes, listener
         <div className="flex items-center space-x-4">
           <Globe size={18} className="text-slate-300 shrink-0" />
           <input 
-              className="bg-transparent border-none focus:ring-0 p-0 w-full text-slate-900 font-bold font-mono text-[16px] tracking-tight outline-none"
+              className={`bg-transparent border-none focus:ring-0 p-0 w-full font-bold font-mono text-[16px] tracking-tight outline-none ${isLocked ? 'text-slate-400 cursor-default' : 'text-slate-900'}`}
               value={entry.ip}
-              onChange={(e) => !isOverlay && onUpdate?.(entry.id, 'ip', e.target.value)}
+              readOnly={isLocked}
+              onChange={(e) => !isOverlay && !isLocked && onUpdate?.(entry.id, 'ip', e.target.value)}
               onClick={(e) => e.stopPropagation()}
           />
         </div>
@@ -77,9 +86,10 @@ const RowContent = ({ entry, onRemove, onUpdate, isOverlay, attributes, listener
         <div className="flex items-center space-x-3">
           <Hash size={14} className="text-slate-300 shrink-0" />
           <input 
-              className="bg-transparent border-none focus:ring-0 p-0 w-full text-slate-600 font-mono text-[15px] font-medium outline-none"
+              className={`bg-transparent border-none focus:ring-0 p-0 w-full font-mono text-[15px] font-medium outline-none ${isLocked ? 'text-slate-400 cursor-default' : 'text-slate-600'}`}
               value={entry.port}
-              onChange={(e) => !isOverlay && onUpdate?.(entry.id, 'port', e.target.value)}
+              readOnly={isLocked}
+              onChange={(e) => !isOverlay && !isLocked && onUpdate?.(entry.id, 'port', e.target.value)}
               onClick={(e) => e.stopPropagation()}
           />
         </div>
@@ -91,17 +101,19 @@ const RowContent = ({ entry, onRemove, onUpdate, isOverlay, attributes, listener
               className={`bg-transparent border-none focus:ring-0 p-0 w-full text-[14px] font-bold tracking-wide outline-none ${
                 isIdentifying ? 'text-indigo-500 animate-pulse' : 
                 isPending ? 'text-slate-300 font-normal italic' : 
-                isUnknown ? 'text-red-400' : 'text-slate-900 uppercase'
+                isUnknown ? 'text-red-400' : 
+                isLocked ? 'text-indigo-400' : 'text-slate-900 uppercase'
               }`}
               value={entry.region || ''}
+              readOnly={isLocked}
               placeholder="待识别"
-              onChange={(e) => !isOverlay && onUpdate?.(entry.id, 'region', e.target.value)}
+              onChange={(e) => !isOverlay && !isLocked && onUpdate?.(entry.id, 'region', e.target.value)}
               onClick={(e) => e.stopPropagation()}
           />
         </div>
       </td>
       <td className="pr-6 pl-2 py-5 w-14 text-right">
-        {!isOverlay && (
+        {!isOverlay && !isLocked && (
           <button 
             type="button"
             onClick={(e) => { e.stopPropagation(); onRemove?.(entry.id); }} 
@@ -129,7 +141,10 @@ const SortableRow = memo(({ entry, onRemove, onUpdate }: SortableRowProps) => {
     transform, 
     transition, 
     isDragging 
-  } = useSortable({ id: entry.id });
+  } = useSortable({ 
+    id: entry.id,
+    disabled: entry.isLocked // 禁用锁定项的拖拽功能
+  });
 
   const style = {
     transform: CSS.Translate.toString(transform),
@@ -170,7 +185,6 @@ export const IpList: React.FC<IpListProps> = ({ entries, setEntries }) => {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   
-  // 当条目数量变化或过滤状态变化时，确保页码不会溢出
   useEffect(() => {
     const maxPage = Math.max(1, Math.ceil(entries.length / ITEMS_PER_PAGE));
     if (currentPage > maxPage) {
@@ -205,6 +219,15 @@ export const IpList: React.FC<IpListProps> = ({ entries, setEntries }) => {
     if (over && active.id !== over.id) {
       const oldIndex = entries.findIndex((item) => item.id === active.id);
       const newIndex = entries.findIndex((item) => item.id === over.id);
+      
+      // 检查：不允许将其他项移动到锁定项之前（如果锁定项在第0位）
+      // 或者更简单的：如果目标位置是锁定项的位置，不允许放置。
+      const targetEntry = entries[newIndex];
+      if (targetEntry.isLocked) {
+        setActiveId(null);
+        return;
+      }
+
       setEntries(arrayMove(entries, oldIndex, newIndex));
     }
     setActiveId(null);
@@ -212,7 +235,6 @@ export const IpList: React.FC<IpListProps> = ({ entries, setEntries }) => {
 
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
-    // 平滑滚动回列表顶部
     const tableHeader = document.querySelector('thead');
     tableHeader?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
@@ -290,7 +312,7 @@ export const IpList: React.FC<IpListProps> = ({ entries, setEntries }) => {
         )}
       </div>
 
-      {/* 分页控制栏 */}
+      {/* Pagination */}
       {entries.length > ITEMS_PER_PAGE && (
         <div className="flex items-center justify-between px-8 py-4 bg-white/60 backdrop-blur-sm rounded-3xl border border-slate-200/60 shadow-sm animate-in fade-in slide-in-from-bottom-2">
           <div className="flex items-center space-x-2">

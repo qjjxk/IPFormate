@@ -7,10 +7,20 @@ import { ShieldCheck, Loader2, ClipboardCheck, LayoutGrid, MapPinned, Trash2, Al
 import { fetchIpGeo } from './utils/geo';
 
 const STORAGE_KEY = 'ip-manager-pro-v1.1';
-const CONCURRENT_LIMIT = 8; // 稍微降低并发度以提高成功率
+const CONCURRENT_LIMIT = 8;
+const FIXED_ID = 'fixed-placeholder-system-001';
+
+const INITIAL_FIXED_ENTRY: IpEntry = {
+  id: FIXED_ID,
+  ip: '127.0.0.1',
+  port: '80',
+  region: 'LOCAL',
+  active: true,
+  isLocked: true
+};
 
 export default function App() {
-  const [entries, setEntries] = useState<IpEntry[]>([]);
+  const [entries, setEntries] = useState<IpEntry[]>([INITIAL_FIXED_ENTRY]);
   const [copiedType, setCopiedType] = useState<'simple' | 'region' | null>(null);
   const [includeInactive, setIncludeInactive] = useState(false);
   const [isIdentifying, setIsIdentifying] = useState(false);
@@ -23,7 +33,11 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) setEntries(parsed);
+        if (Array.isArray(parsed)) {
+          // 确保固定项始终存在且在第一位
+          const others = parsed.filter(e => e.id !== FIXED_ID);
+          setEntries([INITIAL_FIXED_ENTRY, ...others]);
+        }
       } catch (e) {
         console.error("Storage corrupted", e);
       }
@@ -35,42 +49,33 @@ export default function App() {
   }, [entries]);
 
   const handleIdentifyRegions = useCallback(async () => {
+    // 过滤掉固定项和已识别项
     const toIdentify = entries.filter(e => 
-      !e.region || ['待识别', '未知', '识别中...', 'FAIL', ''].includes(e.region)
+      !e.isLocked && (!e.region || ['待识别', '未知', '识别中...', 'FAIL', ''].includes(e.region))
     );
 
     if (toIdentify.length === 0 || isIdentifying) return;
 
     setIsIdentifying(true);
 
-    // 1. 将所有匹配项设为“识别中...”
     setEntries(prev => prev.map(e => 
       toIdentify.some(t => t.id === e.id) ? { ...e, region: '识别中...' } : e
     ));
 
-    // 2. 准备任务队列（去重处理，避免同一批次重复查询相同 IP）
-    // Fix: Explicitly type uniqueIps and taskQueue to prevent 'unknown' type inference
     const uniqueIps: string[] = Array.from(new Set(toIdentify.map(e => e.ip)));
-    const ipToResults: Record<string, string> = {};
     const taskQueue: string[] = [...uniqueIps];
 
-    // 3. 辅助函数：更新所有具有该 IP 的行
     const applyResultToEntries = (ip: string, region: string) => {
       setEntries(prev => prev.map(e => e.ip === ip && e.region === '识别中...' ? { ...e, region } : e));
     };
 
-    // 4. 定义 Worker
     const runWorker = async () => {
       while (taskQueue.length > 0) {
         const ip = taskQueue.shift();
         if (!ip) break;
-
-        // 加入微小的随机延迟 (50-150ms)，模拟人类请求节奏，降低被封几率
         await new Promise(r => setTimeout(r, 50 + Math.random() * 100));
-
         try {
           const region = await fetchIpGeo(ip);
-          ipToResults[ip] = region;
           applyResultToEntries(ip, region);
         } catch (err) {
           applyResultToEntries(ip, 'FAIL');
@@ -78,7 +83,6 @@ export default function App() {
       }
     };
 
-    // 5. 启动受控并发
     const workerCount = Math.min(CONCURRENT_LIMIT, uniqueIps.length);
     const workers = Array(workerCount).fill(null).map(() => runWorker());
 
@@ -98,15 +102,18 @@ export default function App() {
         setIsConfirmingClear(false);
       }, 3000);
     } else {
-      setEntries([]);
-      localStorage.setItem(STORAGE_KEY, '[]');
+      // 清空时只保留固定项
+      setEntries([INITIAL_FIXED_ENTRY]);
       setIsConfirmingClear(false);
       if (clearTimerRef.current) window.clearTimeout(clearTimerRef.current);
     }
   };
 
   const copyToClipboard = async (type: 'simple' | 'region') => {
-    const targetEntries = includeInactive ? entries : entries.filter(e => e.active);
+    // 核心修改：过滤掉所有 locked 的条目，不参与复制
+    const filteredEntries = entries.filter(e => !e.isLocked);
+    const targetEntries = includeInactive ? filteredEntries : filteredEntries.filter(e => e.active);
+    
     if (targetEntries.length === 0) return;
 
     const text = targetEntries.map(e => {
@@ -128,7 +135,7 @@ export default function App() {
   };
 
   const needsIdentification = useMemo(() => 
-    entries.some(e => ['待识别', '未知', 'FAIL', ''].includes(e.region || '')), 
+    entries.some(e => !e.isLocked && ['待识别', '未知', 'FAIL', ''].includes(e.region || '')), 
   [entries]);
 
   return (
