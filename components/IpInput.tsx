@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Upload, AlertCircle } from 'lucide-react';
+import { Plus, Upload, AlertCircle, Terminal, FileCode, Sparkles, Wand2, Monitor } from 'lucide-react';
 import { IpEntry } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { parseBatchInput } from '../utils/parser';
@@ -16,163 +16,165 @@ export const IpInput: React.FC<IpInputProps> = ({ onAdd, existingEntries }) => {
   const [singlePort, setSinglePort] = useState('');
   const [singleRegion, setSingleRegion] = useState('');
   const [batchText, setBatchText] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ msg: string; type: 'error' | 'success' } | null>(null);
 
   const isDuplicate = (ip: string, port: string) => {
     return existingEntries.some(e => e.ip === ip && e.port === port);
   };
 
+  const fillExample = () => {
+    const example = `8.8.8.8:53 #Google DNS\n1.1.1.1:443 #Cloudflare\n208.67.222.222:53 #OpenDNS\n[2001:4860:4860::8888]:53 #IPv6`;
+    setBatchText(example);
+  };
+
   const handleSingleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!singleIp || !singlePort) { setError({ msg: 'IP 和端口是必填项', type: 'error' }); return; }
+    if (isDuplicate(singleIp, singlePort)) { setError({ msg: `IP ${singleIp}:${singlePort} 已存在`, type: 'error' }); return; }
 
-    if (!singleIp || !singlePort) {
-      setError('IP 和端口是必填项');
-      return;
-    }
-
-    if (isDuplicate(singleIp, singlePort)) {
-      setError(`IP ${singleIp}:${singlePort} 已存在`);
-      return;
-    }
-
-    onAdd([{
-      id: uuidv4(),
-      ip: singleIp,
-      port: singlePort,
-      region: singleRegion,
-      active: true
-    }]);
-
-    setSingleIp('');
-    setSinglePort('');
-    setSingleRegion('');
+    onAdd([{ id: uuidv4(), ip: singleIp, port: singlePort, region: singleRegion, active: true }]);
+    setSingleIp(''); setSinglePort(''); setSingleRegion('');
+    setError({ msg: '添加成功', type: 'success' });
+    setTimeout(() => setError(null), 2000);
   };
 
   const handleBatchAdd = () => {
     setError(null);
     if (!batchText.trim()) return;
-
     const parsed = parseBatchInput(batchText);
     const newEntries: IpEntry[] = [];
-    let duplicatesCount = 0;
+    let dups = 0;
 
     parsed.forEach(entry => {
-      if (!isDuplicate(entry.ip, entry.port)) {
-        // Check for internal duplicates within the batch
-        if (!newEntries.some(ne => ne.ip === entry.ip && ne.port === entry.port)) {
-          newEntries.push(entry);
-        } else {
-          duplicatesCount++;
-        }
-      } else {
-        duplicatesCount++;
-      }
+      if (!isDuplicate(entry.ip, entry.port) && !newEntries.some(ne => ne.ip === entry.ip && ne.port === entry.port)) {
+        newEntries.push(entry);
+      } else { dups++; }
     });
 
-    if (newEntries.length === 0 && parsed.length > 0) {
-      setError('所有输入的 IP 都已存在。');
-      return;
-    }
-
-    if (duplicatesCount > 0) {
-       // Just a gentle warning, but still add the rest
-       setError(`成功导入 ${newEntries.length} 个，忽略 ${duplicatesCount} 个重复项。`);
-    }
-
+    if (newEntries.length === 0 && parsed.length > 0) { setError({ msg: '所有输入的 IP 都已存在。', type: 'error' }); return; }
     onAdd(newEntries);
     setBatchText('');
+    setError({ msg: `成功导入 ${newEntries.length} 条数据${dups > 0 ? `，忽略 ${dups} 条重复` : ''}`, type: 'success' });
+    setTimeout(() => setError(null), 3000);
   };
 
   return (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8">
-      <div className="flex space-x-4 mb-4 border-b border-slate-100 pb-2">
-        <button
-          onClick={() => setMode('batch')}
-          className={cn(
-            "pb-2 text-sm font-medium transition-colors",
-            mode === 'batch' 
-              ? "text-blue-600 border-b-2 border-blue-600" 
-              : "text-slate-500 hover:text-slate-700"
-          )}
-        >
-          批量导入
-        </button>
-        <button
-          onClick={() => setMode('single')}
-          className={cn(
-            "pb-2 text-sm font-medium transition-colors",
-            mode === 'single' 
-              ? "text-blue-600 border-b-2 border-blue-600" 
-              : "text-slate-500 hover:text-slate-700"
-          )}
-        >
-          手动添加
-        </button>
+    <div className="bg-white/40 backdrop-blur-xl rounded-[2.5rem] shadow-2xl shadow-slate-200/50 border border-white/80 overflow-hidden transition-all duration-500">
+      {/* 顶部导航切换 */}
+      <div className="p-3 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between">
+        <div className="flex bg-slate-200/50 rounded-2xl p-1 relative w-full sm:w-auto">
+          <button
+            onClick={() => setMode('batch')}
+            className={cn(
+              "px-8 py-2.5 text-xs font-black uppercase tracking-widest transition-all duration-300 rounded-xl flex items-center space-x-2 z-10",
+              mode === 'batch' ? "text-indigo-600 bg-white shadow-sm ring-1 ring-slate-200/50" : "text-slate-400 hover:text-slate-600"
+            )}
+          >
+            <Upload size={14} /> <span>智能解析</span>
+          </button>
+          <button
+            onClick={() => setMode('single')}
+            className={cn(
+              "px-8 py-2.5 text-xs font-black uppercase tracking-widest transition-all duration-300 rounded-xl flex items-center space-x-2 z-10",
+              mode === 'single' ? "text-indigo-600 bg-white shadow-sm ring-1 ring-slate-200/50" : "text-slate-400 hover:text-slate-600"
+            )}
+          >
+            <Plus size={14} /> <span>手动添加</span>
+          </button>
+        </div>
+        
+        {/* 右侧指示 */}
+        <div className="hidden sm:flex items-center space-x-3 text-[10px] font-black text-slate-300 uppercase tracking-widest px-4">
+          <Monitor size={14} />
+          <span>解析引擎 v2.0 Ready</span>
+        </div>
       </div>
 
-      {error && (
-        <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-md flex items-center">
-          <AlertCircle size={16} className="mr-2" />
-          {error}
-        </div>
-      )}
+      <div className="p-8 md:p-10">
+        {error && (
+          <div className={cn(
+            "mb-8 p-4 rounded-2xl text-sm font-bold flex items-center animate-in fade-in slide-in-from-top-1 duration-300",
+            error.type === 'error' ? "bg-red-50 text-red-600 border border-red-100" : "bg-emerald-50 text-emerald-600 border border-emerald-100"
+          )}>
+            <div className={cn("p-1.5 rounded-lg mr-3 shadow-sm", error.type === 'error' ? "bg-white text-red-500" : "bg-white text-emerald-500")}>
+                <AlertCircle size={16} />
+            </div>
+            {error.msg}
+          </div>
+        )}
 
-      {mode === 'single' ? (
-        <form onSubmit={handleSingleAdd} className="flex flex-col md:flex-row gap-3 items-end">
-          <div className="flex-1 w-full">
-            <label className="block text-xs font-semibold text-slate-500 mb-1">IP 地址</label>
-            <input
-              type="text"
-              value={singleIp}
-              onChange={(e) => setSingleIp(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="e.g. 1.1.1.1"
-            />
+        {mode === 'single' ? (
+          <form onSubmit={handleSingleAdd} className="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
+            <div className="space-y-3">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1 block">IP 地址</label>
+              <input value={singleIp} onChange={e => setSingleIp(e.target.value)} className="w-full px-5 py-4 bg-white/50 border border-slate-200 rounded-2xl focus:bg-white focus:ring-4 focus:ring-indigo-100/50 transition-all font-mono text-slate-700 shadow-sm outline-none" placeholder="1.1.1.1" />
+            </div>
+            <div className="space-y-3">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1 block">端口</label>
+              <input value={singlePort} onChange={e => setSinglePort(e.target.value)} className="w-full px-5 py-4 bg-white/50 border border-slate-200 rounded-2xl focus:bg-white focus:ring-4 focus:ring-indigo-100/50 transition-all font-mono text-slate-700 shadow-sm outline-none" placeholder="443" />
+            </div>
+            <div className="space-y-3">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1 block">备注/地区</label>
+              <input value={singleRegion} onChange={e => setSingleRegion(e.target.value)} className="w-full px-5 py-4 bg-white/50 border border-slate-200 rounded-2xl focus:bg-white focus:ring-4 focus:ring-indigo-100/50 transition-all text-slate-700 shadow-sm outline-none" placeholder="例如: HK-01" />
+            </div>
+            <button type="submit" className="h-[58px] bg-slate-900 text-white rounded-2xl hover:bg-black shadow-lg shadow-slate-200 flex items-center justify-center transition-all font-black active:scale-[0.97] group">
+              <Plus size={18} className="mr-2 group-hover:rotate-90 transition-transform" /> 添加节点
+            </button>
+          </form>
+        ) : (
+          <div className="space-y-8">
+            {/* 浅色编辑器容器 */}
+            <div className="relative group rounded-3xl overflow-hidden border border-slate-200 bg-slate-50/50 focus-within:ring-4 focus-within:ring-indigo-50/50 transition-all shadow-inner">
+              {/* 行号栏 - 浅灰色 */}
+              <div className="absolute left-0 top-0 bottom-0 w-12 bg-slate-100/50 border-r border-slate-200/50 flex flex-col items-center pt-5 space-y-2 select-none pointer-events-none">
+                {[1,2,3,4,5,6,7,8].map(n => <span key={n} className="text-[10px] font-mono font-bold text-slate-300">{n}</span>)}
+              </div>
+              
+              <textarea
+                value={batchText}
+                onChange={e => setBatchText(e.target.value)}
+                className="w-full h-64 pl-16 pr-6 py-5 bg-transparent text-slate-700 border-none focus:ring-0 font-mono text-[14px] leading-relaxed placeholder:text-slate-300 resize-none selection:bg-indigo-100 outline-none"
+                placeholder={`在此粘贴包含 IP 的文本数据，例如：\n127.0.0.1:8080 #Localhost\n8.8.8.8:53 - 美国谷歌\n网页上直接复制的数据也可以识别...`}
+              />
+
+              {/* 悬浮操作 */}
+              <div className="absolute right-4 top-4">
+                <button 
+                  onClick={fillExample}
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-[10px] font-black text-indigo-500 rounded-xl shadow-sm border border-slate-100 transition-all flex items-center space-x-2 active:scale-95"
+                >
+                  <Wand2 size={12} />
+                  <span>载入解析范例</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 底部功能区 */}
+            <div className="flex flex-col md:flex-row items-center justify-between gap-8 pt-2">
+              <div className="flex items-start space-x-4 max-w-lg">
+                <div className="mt-1 p-2.5 bg-indigo-50 rounded-2xl text-indigo-500 shrink-0 shadow-sm border border-indigo-100/50">
+                  <Sparkles size={16} />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-slate-700 uppercase tracking-widest mb-1">AI 智能识别已就绪</h4>
+                  <p className="text-[11px] leading-relaxed text-slate-400 font-medium italic">
+                    支持各种格式的模糊输入，系统将自动清洗重复项，并尝试从正文中为您抓取地理位置备注。
+                  </p>
+                </div>
+              </div>
+              
+              <button
+                onClick={handleBatchAdd}
+                className="w-full md:w-auto px-16 py-4.5 bg-indigo-600 text-white rounded-[1.5rem] hover:bg-indigo-700 shadow-xl shadow-indigo-200 transition-all font-black active:scale-[0.98] group flex items-center justify-center"
+              >
+                <FileCode size={18} className="mr-3 group-hover:-translate-y-0.5 transition-transform" />
+                <span className="tracking-widest uppercase text-sm">开始解析并导入</span>
+              </button>
+            </div>
           </div>
-          <div className="w-full md:w-32">
-            <label className="block text-xs font-semibold text-slate-500 mb-1">端口</label>
-            <input
-              type="text"
-              value={singlePort}
-              onChange={(e) => setSinglePort(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="443"
-            />
-          </div>
-          <div className="w-full md:w-32">
-            <label className="block text-xs font-semibold text-slate-500 mb-1">地区</label>
-            <input
-              type="text"
-              value={singleRegion}
-              onChange={(e) => setSingleRegion(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="🇺🇸"
-            />
-          </div>
-          <button
-            type="submit"
-            className="w-full md:w-auto px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center justify-center transition-colors font-medium h-[42px]"
-          >
-            <Plus size={18} className="mr-1" /> 添加
-          </button>
-        </form>
-      ) : (
-        <div className="space-y-3">
-          <textarea
-            value={batchText}
-            onChange={(e) => setBatchText(e.target.value)}
-            className="w-full h-32 px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-            placeholder={`支持格式：\n1. 表格复制 (IP ...)\n2. 23.106.143.6:443,8.209.232.49:8443\n3. 23.106.143.6:443#🇺🇸,3.113.105.32:443#🇯🇵`}
-          />
-          <button
-            onClick={handleBatchAdd}
-            className="px-4 py-2 bg-slate-800 text-white rounded-md hover:bg-slate-900 flex items-center justify-center transition-colors font-medium text-sm"
-          >
-            <Upload size={16} className="mr-2" /> 识别并导入
-          </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };

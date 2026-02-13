@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { memo, useState } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -6,7 +6,10 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  DragEndEvent
+  DragEndEvent,
+  DragStartEvent,
+  DragOverlay,
+  defaultDropAnimationSideEffects,
 } from '@dnd-kit/core';
 import {
   arrayMove,
@@ -16,112 +19,166 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Trash2, AlertCircle } from 'lucide-react';
+import { restrictToVerticalAxis, restrictToWindowEdges } from '@dnd-kit/modifiers';
+import { GripVertical, Trash2, MapPin, Hash, Globe, CheckCircle2 } from 'lucide-react';
 import { IpEntry } from '../types';
 
-// --- Sortable Row Component ---
+interface RowContentProps {
+  entry: IpEntry;
+  onRemove?: (id: string) => void;
+  onUpdate?: (id: string, field: keyof IpEntry, value: any) => void;
+  isOverlay?: boolean;
+  dragHandleProps?: any; // 新增：用于接收拖拽事件
+}
+
+const RowContent = ({ entry, onRemove, onUpdate, isOverlay, dragHandleProps }: RowContentProps) => {
+  const isIdentifying = entry.region === '识别中...';
+  const isPending = !entry.region || entry.region === '待识别';
+  const isUnknown = entry.region === '未知' || entry.region === 'FAIL';
+
+  return (
+    <>
+      <td className="pl-6 pr-1 py-5 w-14 text-center">
+        {/* 关键修复：将 dragHandleProps 绑定到此 div */}
+        <div 
+          {...dragHandleProps} 
+          className="text-slate-300 hover:text-indigo-500 cursor-grab active:cursor-grabbing p-1.5 rounded-lg transition-colors touch-none"
+        >
+          <GripVertical size={18} />
+        </div>
+      </td>
+      <td className="px-4 py-5 w-36">
+        <div className="flex items-center space-x-2.5 justify-center">
+          <input 
+            type="checkbox"
+            checked={entry.active}
+            onChange={(e) => !isOverlay && onUpdate?.(entry.id, 'active', e.target.checked)}
+            className="w-5 h-5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 transition-all cursor-pointer"
+            onClick={(e) => e.stopPropagation()} // 防止触发拖拽
+          />
+          <span className="text-[13px] font-bold text-slate-500 whitespace-nowrap select-none">启用</span>
+        </div>
+      </td>
+      <td className="px-6 py-5 min-w-[220px]">
+        <div className="flex items-center space-x-4">
+          <Globe size={18} className="text-slate-300 shrink-0" />
+          <input 
+              className="bg-transparent border-none focus:ring-0 p-0 w-full text-slate-900 font-bold font-mono text-[16px] tracking-tight outline-none"
+              value={entry.ip}
+              onChange={(e) => !isOverlay && onUpdate?.(entry.id, 'ip', e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      </td>
+      <td className="px-6 py-5 w-40">
+        <div className="flex items-center space-x-3">
+          <Hash size={14} className="text-slate-300 shrink-0" />
+          <input 
+              className="bg-transparent border-none focus:ring-0 p-0 w-full text-slate-600 font-mono text-[15px] font-medium outline-none"
+              value={entry.port}
+              onChange={(e) => !isOverlay && onUpdate?.(entry.id, 'port', e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      </td>
+      <td className="px-6 py-5 w-48">
+        <div className="flex items-center space-x-3">
+          <MapPin size={16} className={isIdentifying ? "text-indigo-500 animate-bounce" : "text-slate-300 shrink-0"} />
+          <input 
+              className={`bg-transparent border-none focus:ring-0 p-0 w-full text-[14px] font-bold tracking-wide outline-none ${
+                isIdentifying ? 'text-indigo-500 animate-pulse' : 
+                isPending ? 'text-slate-300 font-normal italic' : 
+                isUnknown ? 'text-red-400' : 'text-slate-900 uppercase'
+              }`}
+              value={entry.region || ''}
+              placeholder="待识别"
+              onChange={(e) => !isOverlay && onUpdate?.(entry.id, 'region', e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      </td>
+      <td className="pr-6 pl-2 py-5 w-14 text-right">
+        {!isOverlay && (
+          <button 
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onRemove?.(entry.id); }} 
+            className="text-slate-200 hover:text-red-500 transition-all p-2 hover:bg-red-50 rounded-xl"
+          >
+            <Trash2 size={20} />
+          </button>
+        )}
+      </td>
+    </>
+  );
+};
+
 interface SortableRowProps {
   entry: IpEntry;
   onRemove: (id: string) => void;
   onUpdate: (id: string, field: keyof IpEntry, value: any) => void;
 }
 
-const SortableRow: React.FC<SortableRowProps> = ({ entry, onRemove, onUpdate }) => {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging
+const SortableRow = memo(({ entry, onRemove, onUpdate }: SortableRowProps) => {
+  const { 
+    attributes, 
+    listeners, 
+    setNodeRef, 
+    transform, 
+    transition, 
+    isDragging 
   } = useSortable({ id: entry.id });
 
   const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    zIndex: isDragging ? 10 : 'auto',
-    position: isDragging ? 'relative' as const : 'static' as const,
+    // 使用 Translate 代替 Transform 以获得更好的跟随性能
+    transform: CSS.Translate.toString(transform),
+    transition: isDragging ? 'none' : transition,
+    zIndex: isDragging ? 50 : 'auto',
   };
 
   return (
     <tr
       ref={setNodeRef}
       style={style}
-      className={`group hover:bg-slate-50 transition-colors ${isDragging ? 'bg-blue-50 shadow-md ring-1 ring-blue-200' : ''} ${!entry.active ? 'opacity-60 bg-slate-50' : ''}`}
+      className={`group transition-all border-b border-slate-50 last:border-0 ${
+        isDragging 
+          ? 'opacity-30 bg-indigo-50/50' // 拖拽时原位置变淡
+          : 'bg-white hover:bg-indigo-50/20'
+      } ${!entry.active && !isDragging ? 'opacity-30' : ''}`}
     >
-      <td className="px-3 py-4 w-20 text-center">
-        <button
-          {...attributes}
-          {...listeners}
-          className="text-slate-300 hover:text-slate-600 cursor-grab active:cursor-grabbing p-1 rounded inline-flex"
-        >
-          <GripVertical size={20} />
-        </button>
-      </td>
-      <td className="px-3 py-4 w-20 text-center">
-        <input 
-          type="checkbox"
-          checked={entry.active}
-          onChange={(e) => onUpdate(entry.id, 'active', e.target.checked)}
-          className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
-        />
-      </td>
-      <td className="px-4 py-3">
-        <input 
-            className="bg-transparent border-transparent border hover:border-slate-300 focus:border-blue-400 focus:ring-0 rounded px-2 py-1 w-full text-slate-700"
-            value={entry.ip}
-            onChange={(e) => onUpdate(entry.id, 'ip', e.target.value)}
-        />
-      </td>
-      <td className="px-4 py-3 w-32">
-        <input 
-            className="bg-transparent border-transparent border hover:border-slate-300 focus:border-blue-400 focus:ring-0 rounded px-2 py-1 w-full text-slate-700"
-            value={entry.port}
-            onChange={(e) => onUpdate(entry.id, 'port', e.target.value)}
-        />
-      </td>
-      <td className="px-4 py-3 w-32">
-        <input 
-            className="bg-transparent border-transparent border hover:border-slate-300 focus:border-blue-400 focus:ring-0 rounded px-2 py-1 w-full text-slate-700"
-            value={entry.region}
-            placeholder="地区"
-            onChange={(e) => onUpdate(entry.id, 'region', e.target.value)}
-        />
-      </td>
-      <td className="px-4 py-3 w-16 text-center">
-        <button
-          onClick={() => onRemove(entry.id)}
-          className="text-slate-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition-colors"
-          title="删除"
-        >
-          <Trash2 size={18} />
-        </button>
-      </td>
+      <RowContent 
+        entry={entry} 
+        onRemove={onRemove} 
+        onUpdate={onUpdate} 
+        dragHandleProps={{...attributes, ...listeners}} 
+      />
     </tr>
   );
-};
+});
 
-// --- Main List Component ---
+SortableRow.displayName = 'SortableRow';
+
 interface IpListProps {
   entries: IpEntry[];
-  setEntries: (entries: IpEntry[]) => void;
-  onClear: () => void;
+  setEntries: React.Dispatch<React.SetStateAction<IpEntry[]>>;
 }
 
-export const IpList: React.FC<IpListProps> = ({ entries, setEntries, onClear }) => {
-  const [clearConfirm, setClearConfirm] = useState(false);
+export const IpList: React.FC<IpListProps> = ({ entries, setEntries }) => {
+  const [activeId, setActiveId] = useState<string | null>(null);
   
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-        // Prevent drag when editing inputs
-        activationConstraint: {
-            distance: 8,
-        }
+    useSensor(PointerSensor, { 
+      activationConstraint: { 
+        distance: 2 // 非常灵敏的响应距离
+      } 
     }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
+
+  const activeEntry = activeId ? entries.find(e => e.id === activeId) : null;
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -130,86 +187,67 @@ export const IpList: React.FC<IpListProps> = ({ entries, setEntries, onClear }) 
       const newIndex = entries.findIndex((item) => item.id === over.id);
       setEntries(arrayMove(entries, oldIndex, newIndex));
     }
+    setActiveId(null);
   };
-
-  const handleRemove = (id: string) => {
-    setEntries(entries.filter(e => e.id !== id));
-  };
-
-  const handleUpdate = (id: string, field: keyof IpEntry, value: any) => {
-    setEntries(entries.map(e => e.id === id ? { ...e, [field]: value } : e));
-  };
-
-  const handleClearClick = () => {
-    if (clearConfirm) {
-        onClear();
-        setClearConfirm(false);
-    } else {
-        setClearConfirm(true);
-        setTimeout(() => setClearConfirm(false), 3000);
-    }
-  };
-
-  if (entries.length === 0) {
-    return (
-      <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300 text-slate-400">
-        暂无数据，请从上方添加 IP
-      </div>
-    );
-  }
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
-      >
-        <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200">
-            <thead className="bg-slate-50">
-                <tr>
-                <th scope="col" className="w-20 px-1 py-3 text-center">
-                    <button 
-                        onClick={handleClearClick}
-                        className={`text-xs p-1.5 rounded transition-colors flex items-center justify-center mx-auto ${
-                            clearConfirm 
-                            ? 'bg-red-600 text-white hover:bg-red-700' 
-                            : 'text-slate-400 hover:text-red-500 hover:bg-red-50'
-                        }`}
-                        title="清空列表"
-                    >
-                        {clearConfirm ? <span className="font-bold text-[10px]">确定?</span> : <Trash2 size={16} />}
-                    </button>
-                </th>
-                <th scope="col" className="w-20 px-3 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">启用</th>
-                <th scope="col" className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">IP 地址</th>
-                <th scope="col" className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">端口</th>
-                <th scope="col" className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">地区</th>
-                <th scope="col" className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">操作</th>
-                </tr>
+    <div className="bg-white rounded-[2rem] shadow-xl shadow-slate-200/40 border border-slate-200 overflow-hidden mb-20 relative">
+      <div className="overflow-x-auto scrollbar-hide">
+        <DndContext 
+          sensors={sensors} 
+          collisionDetection={closestCenter} 
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={() => setActiveId(null)}
+          modifiers={[restrictToVerticalAxis, restrictToWindowEdges]}
+        >
+          <table className="min-w-full table-fixed border-separate border-spacing-0">
+            <thead className="bg-slate-50/80 border-b border-slate-100 sticky top-0 z-10 backdrop-blur-md">
+              <tr>
+                <th className="w-14 pl-6 pr-1 py-4"></th>
+                <th className="w-36 px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">状态控制</th>
+                <th className="px-6 py-4 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">节点地址</th>
+                <th className="w-40 px-6 py-4 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">通信端口</th>
+                <th className="w-48 px-6 py-4 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">物理区域</th>
+                <th className="w-14 pr-6 pl-2 py-4"></th>
+              </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-slate-200">
-                <SortableContext
-                items={entries.map(e => e.id)}
-                strategy={verticalListSortingStrategy}
-                >
+            <tbody className="divide-y divide-slate-50">
+              <SortableContext items={entries.map(e => e.id)} strategy={verticalListSortingStrategy}>
                 {entries.map((entry) => (
-                    <SortableRow
-                        key={entry.id}
-                        entry={entry}
-                        onRemove={handleRemove}
-                        onUpdate={handleUpdate}
-                    />
+                  <SortableRow
+                    key={entry.id}
+                    entry={entry}
+                    onRemove={(id) => setEntries(prev => prev.filter(e => e.id !== id))}
+                    onUpdate={(id, f, v) => setEntries(prev => prev.map(e => e.id === id ? { ...e, [f]: v } : e))}
+                  />
                 ))}
-                </SortableContext>
+              </SortableContext>
             </tbody>
-            </table>
-        </div>
-      </DndContext>
-      <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 text-xs text-slate-500 text-right">
-        共 {entries.length} 个节点 ({entries.filter(e => e.active).length} 个可用)
+          </table>
+
+          <DragOverlay dropAnimation={null}>
+            {activeEntry ? (
+              <table className="min-w-full table-fixed bg-white shadow-2xl ring-2 ring-indigo-500 rounded-xl overflow-hidden pointer-events-none opacity-90">
+                <tbody>
+                  <tr className="bg-indigo-50/50">
+                    <RowContent entry={activeEntry} isOverlay />
+                  </tr>
+                </tbody>
+              </table>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       </div>
+      
+      {entries.length === 0 && (
+        <div className="py-24 text-center flex flex-col items-center justify-center space-y-4">
+          <div className="p-5 bg-slate-50 rounded-full">
+            <CheckCircle2 size={40} className="text-slate-200" />
+          </div>
+          <p className="text-slate-400 font-bold uppercase tracking-widest text-[11px]">列表为空</p>
+        </div>
+      )}
     </div>
   );
 };

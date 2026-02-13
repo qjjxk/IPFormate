@@ -1,60 +1,108 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { IpEntry } from './types';
 import { IpInput } from './components/IpInput';
 import { IpList } from './components/IpList';
-import { Copy, CheckCircle2, ShieldCheck, ListFilter } from 'lucide-react';
+import { ShieldCheck, Loader2, ClipboardCheck, LayoutGrid, MapPinned, Trash2, AlertTriangle } from 'lucide-react';
+import { fetchBatchGeo } from './utils/geo';
 
-const STORAGE_KEY = 'ip-manager-data';
+const STORAGE_KEY = 'ip-manager-pro-v1.1';
 
 export default function App() {
   const [entries, setEntries] = useState<IpEntry[]>([]);
   const [copiedType, setCopiedType] = useState<'simple' | 'region' | null>(null);
   const [includeInactive, setIncludeInactive] = useState(false);
+  const [isIdentifying, setIsIdentifying] = useState(false);
+  
+  // 核心修复：使用内部状态管理清空确认，不依赖浏览器 confirm 弹窗
+  const [isConfirmingClear, setIsConfirmingClear] = useState(false);
+  
+  // Fix: Replaced NodeJS.Timeout with number to avoid 'Cannot find namespace NodeJS' error in browser environments
+  const clearTimerRef = useRef<number | null>(null);
 
-  // Load from local storage
+  // 初始化加载
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Migration: ensure active field exists if loading old data
-        const migrated = parsed.map((e: any) => ({
-            ...e,
-            active: e.active !== undefined ? e.active : true
-        }));
-        setEntries(migrated);
+        if (Array.isArray(parsed)) setEntries(parsed);
       } catch (e) {
-        console.error("Failed to parse saved data", e);
+        console.error("Storage corrupted", e);
       }
     }
   }, []);
 
-  // Save to local storage
+  // 持久化存储
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
   }, [entries]);
 
-  const handleAdd = (newEntries: IpEntry[]) => {
-    setEntries(prev => [...prev, ...newEntries]);
+  // 批量识别
+  const handleIdentifyRegions = useCallback(async () => {
+    const toIdentify = entries.filter(e => 
+      !e.region || ['待识别', '未知', '识别中...', 'FAIL', ''].includes(e.region)
+    );
+
+    if (toIdentify.length === 0 || isIdentifying) return;
+
+    setIsIdentifying(true);
+    setEntries(prev => prev.map(e => 
+      toIdentify.some(t => t.id === e.id) ? { ...e, region: '识别中...' } : e
+    ));
+
+    const uniqueIps: string[] = Array.from(new Set(toIdentify.map(e => e.ip)));
+    
+    try {
+      const geoResults = await fetchBatchGeo(uniqueIps);
+      setEntries(prev => prev.map(entry => {
+        if (toIdentify.some(t => t.id === entry.id)) {
+          const res = geoResults[entry.ip];
+          return { ...entry, region: res || '未知' };
+        }
+        return entry;
+      }));
+    } finally {
+      setIsIdentifying(false);
+    }
+  }, [entries, isIdentifying]);
+
+  const handleAdd = useCallback((newEntries: IpEntry[]) => {
+    setEntries(prev => [...prev, ...newEntries.map(e => ({ ...e, region: e.region || '待识别' }))]);
+  }, []);
+
+  // 核心修复：二次确认清空逻辑 (不使用 window.confirm)
+  const handleClearClick = () => {
+    if (!isConfirmingClear) {
+      // 第一次点击：进入确认状态
+      setIsConfirmingClear(true);
+      // 3秒后自动恢复，防止误触后按钮一直卡在确认状态
+      // Fix: Used window.clearTimeout and window.setTimeout to explicitly use browser APIs
+      if (clearTimerRef.current) window.clearTimeout(clearTimerRef.current);
+      clearTimerRef.current = window.setTimeout(() => {
+        setIsConfirmingClear(false);
+      }, 3000);
+    } else {
+      // 第二次点击：真正执行清空
+      setEntries([]);
+      localStorage.setItem(STORAGE_KEY, '[]');
+      setIsConfirmingClear(false);
+      if (clearTimerRef.current) window.clearTimeout(clearTimerRef.current);
+    }
   };
 
   const copyToClipboard = async (type: 'simple' | 'region') => {
-    let text = '';
-    // Determine which entries to copy based on the toggle
     const targetEntries = includeInactive ? entries : entries.filter(e => e.active);
+    if (targetEntries.length === 0) return;
 
-    if (targetEntries.length === 0) {
-        alert(includeInactive ? "列表为空" : "没有选中的可用 IP");
-        return;
-    }
-    
-    if (type === 'simple') {
-      // Format: 23.106.143.6:443,8.209.232.49:8443
-      text = targetEntries.map(e => `${e.ip}:${e.port}`).join(',');
-    } else {
-      // Format: 23.106.143.6:443#🇺🇸 or 23.106.143.6:443 (if no region)
-      text = targetEntries.map(e => `${e.ip}:${e.port}${e.region ? '#' + e.region : ''}`).join(',');
-    }
+    const text = targetEntries.map(e => {
+      const base = `${e.ip}:${e.port}`;
+      if (type === 'region') {
+        const regText = e.region && !['待识别', '识别中...', '未知', ''].includes(e.region) ? `#${e.region}` : '';
+        return `${base}${regText}`;
+      }
+      return base;
+    }).join(',');
 
     try {
       await navigator.clipboard.writeText(text);
@@ -65,82 +113,130 @@ export default function App() {
     }
   };
 
-  const handleClear = () => {
-    setEntries([]);
-  }
+  const needsIdentification = useMemo(() => 
+    entries.some(e => ['待识别', '未知', 'FAIL', ''].includes(e.region || '')), 
+  [entries]);
 
   return (
-    <div className="min-h-screen bg-slate-50 py-10 px-4 md:px-8 font-sans">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center space-x-3">
-                <div className="p-3 bg-blue-600 rounded-lg text-white shadow-lg shadow-blue-200">
-                    <ShieldCheck size={28} />
-                </div>
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-800">IP 优选配置生成器</h1>
-                    <p className="text-slate-500 text-sm">批量管理、去重、排序与格式化导出</p>
-                </div>
-            </div>
-        </div>
-
-        <IpInput onAdd={handleAdd} existingEntries={entries} />
-
-        {entries.length > 0 && (
-            <div className="mb-6">
-                <div className="flex justify-end mb-3">
-                    <label className="flex items-center space-x-2 text-sm text-slate-600 cursor-pointer select-none bg-white px-3 py-1.5 rounded-full border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors">
-                        <input
-                            type="checkbox"
-                            checked={includeInactive}
-                            onChange={(e) => setIncludeInactive(e.target.checked)}
-                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 border-gray-300"
-                        />
-                        <span className="flex items-center font-medium">
-                            <ListFilter size={14} className="mr-1.5" />
-                            包含未启用节点 ({includeInactive ? entries.length : entries.filter(e => e.active).length})
-                        </span>
-                    </label>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <button
-                        type="button"
-                        onClick={() => copyToClipboard('simple')}
-                        className="group relative flex items-center justify-center space-x-2 w-full px-4 py-4 bg-white border-2 border-slate-200 hover:border-blue-500 text-slate-700 hover:text-blue-600 rounded-xl transition-all shadow-sm active:scale-[0.98]"
-                    >
-                        {copiedType === 'simple' ? <CheckCircle2 className="text-green-500" /> : <Copy size={18} />}
-                        <span className="font-semibold">
-                            {includeInactive ? "复制全部 (格式一)" : "复制选中 (格式一)"}
-                        </span>
-                        <span className="absolute -bottom-6 text-[10px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                            IP:Port,IP:Port...
-                        </span>
-                    </button>
-                    
-                    <button
-                        type="button"
-                        onClick={() => copyToClipboard('region')}
-                        className="group relative flex items-center justify-center space-x-2 w-full px-4 py-4 bg-white border-2 border-slate-200 hover:border-blue-500 text-slate-700 hover:text-blue-600 rounded-xl transition-all shadow-sm active:scale-[0.98]"
-                    >
-                        {copiedType === 'region' ? <CheckCircle2 className="text-green-500" /> : <Copy size={18} />}
-                        <span className="font-semibold">
-                            {includeInactive ? "复制全部 (格式二)" : "复制选中 (格式二)"}
-                        </span>
-                        <span className="absolute -bottom-6 text-[10px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                            IP:Port#Region,IP:Port...
-                        </span>
-                    </button>
-                </div>
-            </div>
-        )}
-
-        <IpList entries={entries} setEntries={setEntries} onClear={handleClear} />
+    <div className="min-h-screen py-8 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto selection:bg-indigo-100 selection:text-indigo-900">
+      <div className="space-y-8">
         
-        <div className="mt-8 text-center text-xs text-slate-400">
-            支持拖动左侧手柄排序 • 刷新页面数据自动保存
-        </div>
+        {/* Header */}
+        <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 px-1">
+          <div className="space-y-2">
+            <div className="flex items-center space-x-3">
+              <div className="p-3 bg-slate-900 rounded-2xl text-white shadow-xl flex items-center justify-center transform hover:rotate-2 transition-transform">
+                <ShieldCheck size={28} />
+              </div>
+              <h1 className="text-3xl font-black text-slate-900 tracking-tight">IP Manager <span className="text-indigo-600">Pro</span></h1>
+            </div>
+            <p className="text-sm text-slate-400 font-semibold tracking-wide uppercase">节点高效配置与地理位置识别套件</p>
+          </div>
+        </header>
+
+        {/* Input Section */}
+        <section className="relative z-10">
+           <IpInput onAdd={handleAdd} existingEntries={entries} />
+        </section>
+
+        {/* Content Area */}
+        {entries.length > 0 && (
+          <div className="space-y-6 animate-in fade-in duration-500">
+            {/* Action Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <button
+                onClick={() => copyToClipboard('simple')}
+                className="group flex flex-col items-center justify-center p-6 bg-white border border-slate-200 hover:border-indigo-400 rounded-2xl transition-all active:scale-[0.98] hover:shadow-xl hover:shadow-indigo-500/5"
+              >
+                <div className="flex items-center space-x-2.5 mb-1">
+                  {copiedType === 'simple' ? <ClipboardCheck className="text-emerald-500" size={20} /> : null}
+                  <span className="font-black text-slate-800 group-hover:text-indigo-600 transition-colors uppercase tracking-wider text-sm">
+                    {copiedType === 'simple' ? "复制成功" : "复制地址:端口"}
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] opacity-60">RAW 节点格式</span>
+              </button>
+              
+              <button
+                onClick={() => copyToClipboard('region')}
+                className="group flex flex-col items-center justify-center p-6 bg-white border border-slate-200 hover:border-violet-400 rounded-2xl transition-all active:scale-[0.98] hover:shadow-xl hover:shadow-violet-500/5"
+              >
+                <div className="flex items-center space-x-2.5 mb-1">
+                  {copiedType === 'region' ? <ClipboardCheck className="text-emerald-500" size={20} /> : null}
+                  <span className="font-black text-slate-800 group-hover:text-violet-600 transition-colors uppercase tracking-wider text-sm">
+                    {copiedType === 'region' ? "复制成功" : "复制地址:端口#地区"}
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] opacity-60">标注节点格式</span>
+              </button>
+            </div>
+
+            {/* Toolbar */}
+            <div className="sticky top-4 z-40">
+                <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center justify-between bg-white/95 backdrop-blur-md p-3 rounded-[1.5rem] border border-slate-200 shadow-xl shadow-slate-200/40">
+                    <button
+                      onClick={handleIdentifyRegions}
+                      disabled={isIdentifying || !needsIdentification}
+                      className={`flex-1 sm:flex-none flex items-center justify-center space-x-3 px-8 py-3.5 rounded-xl font-black text-sm transition-all shadow-md active:scale-95 ${
+                        isIdentifying 
+                        ? "bg-indigo-50 text-indigo-400 cursor-wait animate-pulse" 
+                        : needsIdentification 
+                          ? "bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-200" 
+                          : "bg-slate-100 text-slate-400 cursor-not-allowed shadow-none"
+                      }`}
+                    >
+                      {isIdentifying ? <Loader2 size={18} className="animate-spin" /> : <MapPinned size={18} />}
+                      <span>{isIdentifying ? "同步全球位置..." : needsIdentification ? "智能识别地理位置" : "节点已全部识别"}</span>
+                    </button>
+
+                    <div className="flex items-center justify-between sm:justify-end gap-5 px-4">
+                      <div className="flex items-center space-x-2 text-slate-400">
+                        <LayoutGrid size={15} />
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em]">{entries.length} 负载就绪</span>
+                      </div>
+                      <div className="h-4 w-px bg-slate-200 hidden sm:block" />
+                      <label className="flex items-center space-x-2 text-xs text-slate-500 cursor-pointer hover:text-indigo-600 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={includeInactive}
+                          onChange={(e) => setIncludeInactive(e.target.checked)}
+                          className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                        />
+                        <span className="font-bold whitespace-nowrap select-none">显示全部</span>
+                      </label>
+                    </div>
+                </div>
+            </div>
+
+            {/* List */}
+            <IpList entries={includeInactive ? entries : entries.filter(e => e.active)} setEntries={setEntries} />
+
+            {/* 彻底清空按钮 - 核心修复位置 */}
+            <div className="flex justify-center pt-8 pb-16 relative z-[999]">
+               <button
+                  type="button"
+                  onClick={handleClearClick}
+                  className={`
+                    flex items-center space-x-3 px-12 py-4 rounded-full shadow-2xl transition-all font-black active:scale-90 group border-4
+                    ${isConfirmingClear 
+                      ? "bg-amber-500 border-amber-200 text-white animate-pulse scale-110" 
+                      : "bg-[#f84c4c] border-red-300/30 text-white hover:bg-red-600 shadow-red-200"
+                    }
+                  `}
+                >
+                  {isConfirmingClear ? <AlertTriangle size={24} className="animate-bounce" /> : <Trash2 size={24} />}
+                  <span className="text-lg tracking-wider">
+                    {isConfirmingClear ? "请再次点击以确认清空" : "彻底清空当前列表"}
+                  </span>
+                </button>
+            </div>
+          </div>
+        )}
       </div>
+      
+      <footer className="mt-12 mb-10 text-center space-y-2 opacity-50">
+        <p className="text-slate-400 font-black text-[10px] tracking-[0.4em] uppercase">Security First · Local Process Only</p>
+      </footer>
     </div>
   );
 }

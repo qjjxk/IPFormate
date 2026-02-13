@@ -1,164 +1,60 @@
 import { IpEntry } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
-// Helper to try and map common region codes to Emojis for better UX
-const REGION_MAP: Record<string, string> = {
-  'ICN': '🇰🇷', // Incheon -> Korea
-  'KR': '🇰🇷',
-  'JP': '🇯🇵',
-  'NRT': '🇯🇵', // Narita
-  'KIX': '🇯🇵', // Kansai
-  'US': '🇺🇸',
-  'LAX': '🇺🇸',
-  'SJC': '🇺🇸',
-  'HK': '🇭🇰',
-  'HKG': '🇭🇰',
-  'SG': '🇸🇬',
-  'SIN': '🇸🇬',
-  'TW': '🇹🇼',
-  'TPE': '🇹🇼',
-  'CN': '🇨🇳',
-  'UK': '🇬🇧',
-  'GB': '🇬🇧',
-  'DE': '🇩🇪',
-  'FR': '🇫🇷',
-  'CA': '🇨🇦',
-};
+/**
+ * 极简健壮的解析逻辑：
+ * 采用全局正则扫描模式，不再依赖 split 分隔符。
+ * 只要文本中包含 IP:Port 模式（IPv4 或 IPv6），就能被精准抓取。
+ */
+export const parseBatchInput = (text: string): IpEntry[] => {
+  if (!text) return [];
 
-const parseCompactEntry = (text: string): IpEntry | null => {
-  // Format: IP:Port or IP:Port#Region
-  const hashSplit = text.split('#');
-  const ipPort = hashSplit[0];
-  const regionRaw = hashSplit[1]; 
+  // 全局匹配 IP:Port。
+  // 支持标准 IPv4 和 带方括号的 IPv6
+  const globalPattern = /((?:\d{1,3}\.){3}\d{1,3}|\[?[a-fA-F0-9:]+\]?):(\d+)/g;
   
-  const lastColon = ipPort.lastIndexOf(':');
-  if (lastColon === -1) return null;
+  const entries: IpEntry[] = [];
+  const seen = new Set<string>();
   
-  const ip = ipPort.substring(0, lastColon).trim();
-  const port = ipPort.substring(lastColon + 1).trim();
+  let match;
+  const matches = [];
   
-  if (!ip || !port || isNaN(Number(port))) return null;
-
-  const region = regionRaw ? (REGION_MAP[regionRaw.trim().toUpperCase()] || regionRaw.trim()) : '';
-
-  return {
-      id: uuidv4(),
-      ip,
-      port,
-      region,
-      active: true
-  };
-};
-
-const parsePipeEntry = (line: string): IpEntry | null => {
-  // Format: 150.230.204.21:10243 | JP | Inzai | 0ms
-  const parts = line.split('|').map(p => p.trim());
-  if (parts.length < 1) return null;
-
-  const ipPortPart = parts[0];
-  const lastColon = ipPortPart.lastIndexOf(':');
-  if (lastColon === -1) return null;
-
-  const ip = ipPortPart.substring(0, lastColon).trim();
-  const port = ipPortPart.substring(lastColon + 1).trim();
-  
-  if (!ip || !port || isNaN(Number(port))) return null;
-
-  let region = '';
-  if (parts.length >= 2) {
-    const regionCode = parts[1].toUpperCase();
-    region = REGION_MAP[regionCode] || parts[1];
+  // 第一阶段：扫描所有核心节点
+  while ((match = globalPattern.exec(text)) !== null) {
+    matches.push({
+      index: match.index,
+      full: match[0],
+      ip: match[1],
+      port: match[2],
+      nextIndex: globalPattern.lastIndex
+    });
   }
 
-  return {
-    id: uuidv4(),
-    ip,
-    port,
-    region,
-    active: true
-  };
-};
-
-const parseTableEntry = (line: string): IpEntry | null => {
-    // Split by whitespace
-    const parts = line.split(/\s+/);
+  // 第二阶段：提取节点间的备注信息
+  for (let i = 0; i < matches.length; i++) {
+    const current = matches[i];
+    const next = matches[i + 1];
     
-    // Basic validation: must have at least an IP and a Port
-    if (parts.length >= 2) {
-      const ip = parts[0];
-      let port = parts[parts.length - 1];
-      let region = '';
-
-      // Logic specifically for the provided table format (8 columns)
-      if (parts.length >= 8) {
-        const regionCode = parts[6].toUpperCase();
-        region = REGION_MAP[regionCode] || regionCode;
-        port = parts[7];
-      } else if (parts.length === 2) {
-        port = parts[1];
-      } else if (parts.length === 3) {
-        port = parts[1];
-        region = REGION_MAP[parts[2].toUpperCase()] || parts[2];
-      }
-
-      if (ip.length > 6 && !isNaN(Number(port))) {
-        return {
-          id: uuidv4(),
-          ip,
-          port,
-          region,
-          active: true
-        };
-      }
-    }
-    return null;
-};
-
-export const parseBatchInput = (text: string): IpEntry[] => {
-  const lines = text.split('\n');
-  const entries: IpEntry[] = [];
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
+    // 提取当前节点后到下一个节点前的内容
+    const endPos = next ? next.index : text.length;
+    let suffix = text.substring(current.nextIndex, endPos).trim();
     
-    // Skip header lines
-    if (trimmed.startsWith('IP') || trimmed.includes('已发送') || trimmed.includes('丢包率')) {
-      continue;
-    }
+    // 过滤掉分隔符（逗号、井号等），提取第一行有效文本作为地区/备注
+    const region = suffix
+      .replace(/^[\s,;#|#-]+/, '') 
+      .split(/[\n,;]/)[0]         
+      .trim();
 
-    // New Priority: Pipe format (|)
-    if (trimmed.includes('|')) {
-      const entry = parsePipeEntry(trimmed);
-      if (entry) {
-        entries.push(entry);
-        continue;
-      }
-    }
-
-    // Comma separated values
-    if (trimmed.includes(',')) {
-        const parts = trimmed.split(',');
-        for (const part of parts) {
-            const cleanPart = part.trim();
-            if (!cleanPart) continue;
-            const entry = parseCompactEntry(cleanPart);
-            if (entry) entries.push(entry);
-        }
-    } else {
-        // Table or Compact
-        if (trimmed.includes(' ') || trimmed.includes('\t')) {
-             const entry = parseTableEntry(trimmed);
-             if (entry) entries.push(entry);
-        } else {
-             const entry = parseCompactEntry(trimmed);
-             if (entry) {
-                 entries.push(entry);
-             } else {
-                 const tableEntry = parseTableEntry(trimmed);
-                 if (tableEntry) entries.push(tableEntry);
-             }
-        }
+    const key = `${current.ip}:${current.port}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      entries.push({
+        id: uuidv4(),
+        ip: current.ip,
+        port: current.port,
+        region: region.toUpperCase(),
+        active: true
+      });
     }
   }
 
