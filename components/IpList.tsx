@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useState, useMemo, useEffect } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -20,8 +20,10 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToVerticalAxis, restrictToWindowEdges } from '@dnd-kit/modifiers';
-import { GripVertical, Trash2, MapPin, Hash, Globe, CheckCircle2 } from 'lucide-react';
+import { GripVertical, Trash2, MapPin, Hash, Globe, CheckCircle2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { IpEntry } from '../types';
+
+const ITEMS_PER_PAGE = 10;
 
 interface RowContentProps {
   entry: IpEntry;
@@ -130,7 +132,6 @@ const SortableRow = memo(({ entry, onRemove, onUpdate }: SortableRowProps) => {
   } = useSortable({ id: entry.id });
 
   const style = {
-    // 强制同步位置，移除动画延迟
     transform: CSS.Translate.toString(transform),
     transition: isDragging ? 'none' : transition,
     zIndex: isDragging ? 50 : 'auto',
@@ -167,11 +168,27 @@ interface IpListProps {
 
 export const IpList: React.FC<IpListProps> = ({ entries, setEntries }) => {
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
   
+  // 当条目数量变化或过滤状态变化时，确保页码不会溢出
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(entries.length / ITEMS_PER_PAGE));
+    if (currentPage > maxPage) {
+      setCurrentPage(maxPage);
+    }
+  }, [entries.length, currentPage]);
+
+  const paginatedEntries = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return entries.slice(start, start + ITEMS_PER_PAGE);
+  }, [entries, currentPage]);
+
+  const totalPages = Math.max(1, Math.ceil(entries.length / ITEMS_PER_PAGE));
+
   const sensors = useSensors(
     useSensor(PointerSensor, { 
       activationConstraint: { 
-        distance: 3 // 极短的触发距离，让响应更灵敏
+        distance: 3 
       } 
     }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -193,74 +210,146 @@ export const IpList: React.FC<IpListProps> = ({ entries, setEntries }) => {
     setActiveId(null);
   };
 
-  return (
-    <div className="bg-white rounded-[2rem] shadow-xl shadow-slate-200/40 border border-slate-200 overflow-hidden mb-20 relative">
-      <div className="overflow-x-auto scrollbar-hide">
-        <DndContext 
-          sensors={sensors} 
-          collisionDetection={closestCenter} 
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
-          onDragCancel={() => setActiveId(null)}
-          modifiers={[restrictToVerticalAxis, restrictToWindowEdges]}
-        >
-          <table className="min-w-full table-fixed border-separate border-spacing-0">
-            <thead className="bg-slate-50/80 border-b border-slate-100 sticky top-0 z-10 backdrop-blur-md">
-              <tr>
-                <th className="w-14 pl-6 pr-1 py-4"></th>
-                <th className="w-36 px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">状态控制</th>
-                <th className="px-6 py-4 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">节点地址</th>
-                <th className="w-40 px-6 py-4 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">通信端口</th>
-                <th className="w-48 px-6 py-4 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">物理区域</th>
-                <th className="w-14 pr-6 pl-2 py-4"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              <SortableContext items={entries.map(e => e.id)} strategy={verticalListSortingStrategy}>
-                {entries.map((entry) => (
-                  <SortableRow
-                    key={entry.id}
-                    entry={entry}
-                    onRemove={(id) => setEntries(prev => prev.filter(e => e.id !== id))}
-                    onUpdate={(id, f, v) => setEntries(prev => prev.map(e => e.id === id ? { ...e, [f]: v } : e))}
-                  />
-                ))}
-              </SortableContext>
-            </tbody>
-          </table>
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    // 平滑滚动回列表顶部
+    const tableHeader = document.querySelector('thead');
+    tableHeader?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
 
-          <DragOverlay 
-            dropAnimation={{
-              duration: 200,
-              easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)',
-              sideEffects: defaultDropAnimationSideEffects({
-                styles: {
-                  active: {
-                    opacity: '0.4',
-                  },
-                },
-              }),
-            }}
+  return (
+    <div className="flex flex-col space-y-4 mb-20">
+      <div className="bg-white rounded-[2rem] shadow-xl shadow-slate-200/40 border border-slate-200 overflow-hidden relative">
+        <div className="overflow-x-auto scrollbar-hide">
+          <DndContext 
+            sensors={sensors} 
+            collisionDetection={closestCenter} 
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+            onDragCancel={() => setActiveId(null)}
+            modifiers={[restrictToVerticalAxis, restrictToWindowEdges]}
           >
-            {activeEntry ? (
-              <table className="min-w-full table-fixed bg-white shadow-2xl ring-2 ring-indigo-500 rounded-xl overflow-hidden pointer-events-none opacity-95">
-                <tbody>
-                  <tr className="bg-white">
-                    <RowContent entry={activeEntry} isOverlay />
-                  </tr>
-                </tbody>
-              </table>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
-      </div>
-      
-      {entries.length === 0 && (
-        <div className="py-24 text-center flex flex-col items-center justify-center space-y-4">
-          <div className="p-5 bg-slate-50 rounded-full">
-            <CheckCircle2 size={40} className="text-slate-200" />
+            <table className="min-w-full table-fixed border-separate border-spacing-0">
+              <thead className="bg-slate-50/80 border-b border-slate-100 sticky top-0 z-10 backdrop-blur-md">
+                <tr>
+                  <th className="w-14 pl-6 pr-1 py-4"></th>
+                  <th className="w-36 px-4 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">状态控制</th>
+                  <th className="px-6 py-4 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">节点地址</th>
+                  <th className="w-40 px-6 py-4 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">通信端口</th>
+                  <th className="w-48 px-6 py-4 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">物理区域</th>
+                  <th className="w-14 pr-6 pl-2 py-4"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                <SortableContext items={paginatedEntries.map(e => e.id)} strategy={verticalListSortingStrategy}>
+                  {paginatedEntries.map((entry) => (
+                    <SortableRow
+                      key={entry.id}
+                      entry={entry}
+                      onRemove={(id) => setEntries(prev => prev.filter(e => e.id !== id))}
+                      onUpdate={(id, f, v) => setEntries(prev => prev.map(e => e.id === id ? { ...e, [f]: v } : e))}
+                    />
+                  ))}
+                </SortableContext>
+              </tbody>
+            </table>
+
+            <DragOverlay 
+              dropAnimation={{
+                duration: 200,
+                easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)',
+                sideEffects: defaultDropAnimationSideEffects({
+                  styles: {
+                    active: {
+                      opacity: '0.4',
+                    },
+                  },
+                }),
+              }}
+            >
+              {activeEntry ? (
+                <table className="min-w-full table-fixed bg-white shadow-2xl ring-2 ring-indigo-500 rounded-xl overflow-hidden pointer-events-none opacity-95">
+                  <tbody>
+                    <tr className="bg-white">
+                      <RowContent entry={activeEntry} isOverlay />
+                    </tr>
+                  </tbody>
+                </table>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        </div>
+        
+        {entries.length === 0 && (
+          <div className="py-24 text-center flex flex-col items-center justify-center space-y-4">
+            <div className="p-5 bg-slate-50 rounded-full">
+              <CheckCircle2 size={40} className="text-slate-200" />
+            </div>
+            <p className="text-slate-400 font-black uppercase tracking-widest text-[11px]">列表为空</p>
           </div>
-          <p className="text-slate-400 font-bold uppercase tracking-widest text-[11px]">列表为空</p>
+        )}
+      </div>
+
+      {/* 分页控制栏 */}
+      {entries.length > ITEMS_PER_PAGE && (
+        <div className="flex items-center justify-between px-8 py-4 bg-white/60 backdrop-blur-sm rounded-3xl border border-slate-200/60 shadow-sm animate-in fade-in slide-in-from-bottom-2">
+          <div className="flex items-center space-x-2">
+            <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">
+              第 {currentPage} / {totalPages} 页
+            </span>
+            <span className="text-[11px] font-bold text-slate-300">|</span>
+            <span className="text-[11px] font-bold text-slate-400">
+              共 {entries.length} 个节点
+            </span>
+          </div>
+
+          <div className="flex items-center space-x-1.5">
+            <button
+              onClick={() => handlePageChange(currentPage - 1)}
+              disabled={currentPage === 1}
+              className={`p-2 rounded-xl transition-all ${
+                currentPage === 1 
+                ? "text-slate-200 cursor-not-allowed" 
+                : "text-slate-600 hover:bg-white hover:shadow-md active:scale-90"
+              }`}
+            >
+              <ChevronLeft size={20} />
+            </button>
+
+            <div className="flex items-center space-x-1 px-1">
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
+                .map((page, index, array) => (
+                  <React.Fragment key={page}>
+                    {index > 0 && array[index - 1] !== page - 1 && (
+                      <span className="text-slate-300 px-1 font-black">...</span>
+                    )}
+                    <button
+                      onClick={() => handlePageChange(page)}
+                      className={`min-w-[36px] h-9 rounded-xl text-xs font-black transition-all ${
+                        currentPage === page
+                        ? "bg-indigo-600 text-white shadow-lg shadow-indigo-100 scale-110"
+                        : "text-slate-500 hover:bg-white hover:text-indigo-600 hover:shadow-sm"
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  </React.Fragment>
+                ))}
+            </div>
+
+            <button
+              onClick={() => handlePageChange(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              className={`p-2 rounded-xl transition-all ${
+                currentPage === totalPages 
+                ? "text-slate-200 cursor-not-allowed" 
+                : "text-slate-600 hover:bg-white hover:shadow-md active:scale-90"
+              }`}
+            >
+              <ChevronRight size={20} />
+            </button>
+          </div>
         </div>
       )}
     </div>

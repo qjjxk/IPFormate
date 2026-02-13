@@ -4,23 +4,20 @@ import { IpEntry } from './types';
 import { IpInput } from './components/IpInput';
 import { IpList } from './components/IpList';
 import { ShieldCheck, Loader2, ClipboardCheck, LayoutGrid, MapPinned, Trash2, AlertTriangle } from 'lucide-react';
-import { fetchBatchGeo } from './utils/geo';
+import { fetchIpGeo } from './utils/geo';
 
 const STORAGE_KEY = 'ip-manager-pro-v1.1';
+const CONCURRENT_LIMIT = 8; // 稍微降低并发度以提高成功率
 
 export default function App() {
   const [entries, setEntries] = useState<IpEntry[]>([]);
   const [copiedType, setCopiedType] = useState<'simple' | 'region' | null>(null);
   const [includeInactive, setIncludeInactive] = useState(false);
   const [isIdentifying, setIsIdentifying] = useState(false);
-  
-  // 核心修复：使用内部状态管理清空确认，不依赖浏览器 confirm 弹窗
   const [isConfirmingClear, setIsConfirmingClear] = useState(false);
   
-  // Fix: Replaced NodeJS.Timeout with number to avoid 'Cannot find namespace NodeJS' error in browser environments
   const clearTimerRef = useRef<number | null>(null);
 
-  // 初始化加载
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
@@ -33,12 +30,10 @@ export default function App() {
     }
   }, []);
 
-  // 持久化存储
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
   }, [entries]);
 
-  // 批量识别
   const handleIdentifyRegions = useCallback(async () => {
     const toIdentify = entries.filter(e => 
       !e.region || ['待识别', '未知', '识别中...', 'FAIL', ''].includes(e.region)
@@ -47,43 +42,62 @@ export default function App() {
     if (toIdentify.length === 0 || isIdentifying) return;
 
     setIsIdentifying(true);
+
+    // 1. 将所有匹配项设为“识别中...”
     setEntries(prev => prev.map(e => 
       toIdentify.some(t => t.id === e.id) ? { ...e, region: '识别中...' } : e
     ));
 
+    // 2. 准备任务队列（去重处理，避免同一批次重复查询相同 IP）
+    // Fix: Explicitly type uniqueIps and taskQueue to prevent 'unknown' type inference
     const uniqueIps: string[] = Array.from(new Set(toIdentify.map(e => e.ip)));
-    
-    try {
-      const geoResults = await fetchBatchGeo(uniqueIps);
-      setEntries(prev => prev.map(entry => {
-        if (toIdentify.some(t => t.id === entry.id)) {
-          const res = geoResults[entry.ip];
-          return { ...entry, region: res || '未知' };
+    const ipToResults: Record<string, string> = {};
+    const taskQueue: string[] = [...uniqueIps];
+
+    // 3. 辅助函数：更新所有具有该 IP 的行
+    const applyResultToEntries = (ip: string, region: string) => {
+      setEntries(prev => prev.map(e => e.ip === ip && e.region === '识别中...' ? { ...e, region } : e));
+    };
+
+    // 4. 定义 Worker
+    const runWorker = async () => {
+      while (taskQueue.length > 0) {
+        const ip = taskQueue.shift();
+        if (!ip) break;
+
+        // 加入微小的随机延迟 (50-150ms)，模拟人类请求节奏，降低被封几率
+        await new Promise(r => setTimeout(r, 50 + Math.random() * 100));
+
+        try {
+          const region = await fetchIpGeo(ip);
+          ipToResults[ip] = region;
+          applyResultToEntries(ip, region);
+        } catch (err) {
+          applyResultToEntries(ip, 'FAIL');
         }
-        return entry;
-      }));
-    } finally {
-      setIsIdentifying(false);
-    }
+      }
+    };
+
+    // 5. 启动受控并发
+    const workerCount = Math.min(CONCURRENT_LIMIT, uniqueIps.length);
+    const workers = Array(workerCount).fill(null).map(() => runWorker());
+
+    await Promise.all(workers);
+    setIsIdentifying(false);
   }, [entries, isIdentifying]);
 
   const handleAdd = useCallback((newEntries: IpEntry[]) => {
     setEntries(prev => [...prev, ...newEntries.map(e => ({ ...e, region: e.region || '待识别' }))]);
   }, []);
 
-  // 核心修复：二次确认清空逻辑 (不使用 window.confirm)
   const handleClearClick = () => {
     if (!isConfirmingClear) {
-      // 第一次点击：进入确认状态
       setIsConfirmingClear(true);
-      // 3秒后自动恢复，防止误触后按钮一直卡在确认状态
-      // Fix: Used window.clearTimeout and window.setTimeout to explicitly use browser APIs
       if (clearTimerRef.current) window.clearTimeout(clearTimerRef.current);
       clearTimerRef.current = window.setTimeout(() => {
         setIsConfirmingClear(false);
       }, 3000);
     } else {
-      // 第二次点击：真正执行清空
       setEntries([]);
       localStorage.setItem(STORAGE_KEY, '[]');
       setIsConfirmingClear(false);
@@ -98,7 +112,7 @@ export default function App() {
     const text = targetEntries.map(e => {
       const base = `${e.ip}:${e.port}`;
       if (type === 'region') {
-        const regText = e.region && !['待识别', '识别中...', '未知', ''].includes(e.region) ? `#${e.region}` : '';
+        const regText = e.region && !['待识别', '识别中...', '未知', 'FAIL', '识别成功', ''].includes(e.region) ? `#${e.region}` : '';
         return `${base}${regText}`;
       }
       return base;
@@ -176,17 +190,17 @@ export default function App() {
                 <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center justify-between bg-white/95 backdrop-blur-md p-3 rounded-[1.5rem] border border-slate-200 shadow-xl shadow-slate-200/40">
                     <button
                       onClick={handleIdentifyRegions}
-                      disabled={isIdentifying || !needsIdentification}
+                      disabled={isIdentifying}
                       className={`flex-1 sm:flex-none flex items-center justify-center space-x-3 px-8 py-3.5 rounded-xl font-black text-sm transition-all shadow-md active:scale-95 ${
                         isIdentifying 
-                        ? "bg-indigo-50 text-indigo-400 cursor-wait animate-pulse" 
+                        ? "bg-indigo-50 text-indigo-400 cursor-wait animate-pulse border border-indigo-100" 
                         : needsIdentification 
                           ? "bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-200" 
                           : "bg-slate-100 text-slate-400 cursor-not-allowed shadow-none"
                       }`}
                     >
                       {isIdentifying ? <Loader2 size={18} className="animate-spin" /> : <MapPinned size={18} />}
-                      <span>{isIdentifying ? "同步全球位置..." : needsIdentification ? "智能识别地理位置" : "节点已全部识别"}</span>
+                      <span>{isIdentifying ? "智能轮询中..." : needsIdentification ? "智能识别地理位置" : "节点已全部识别"}</span>
                     </button>
 
                     <div className="flex items-center justify-between sm:justify-end gap-5 px-4">
@@ -211,7 +225,6 @@ export default function App() {
             {/* List */}
             <IpList entries={includeInactive ? entries : entries.filter(e => e.active)} setEntries={setEntries} />
 
-            {/* 彻底清空按钮 - 核心修复位置 */}
             <div className="flex justify-center pt-8 pb-16 relative z-[999]">
                <button
                   type="button"
