@@ -23,7 +23,7 @@ export const IpInput: React.FC<IpInputProps> = ({ onAdd, existingEntries }) => {
   };
 
   const fillExample = () => {
-    const example = `8.8.8.8:53 #Google DNS\n1.1.1.1:443 #Cloudflare\n208.67.222.222:53 #OpenDNS\n[2001:4860:4860::8888]:53 #IPv6`;
+    const example = `8.8.8.8:53 #Google DNS\n1.1.1.1:443 #Cloudflare\n208.67.222.222:80 #Will be ignored\n[2001:4860:4860::8888]:8080 #Will be ignored`;
     setBatchText(example);
   };
 
@@ -31,6 +31,13 @@ export const IpInput: React.FC<IpInputProps> = ({ onAdd, existingEntries }) => {
     e.preventDefault();
     setError(null);
     if (!singleIp || !singlePort) { setError({ msg: 'IP 和端口是必填项', type: 'error' }); return; }
+    
+    // 同时也对手动添加做限制
+    if (singlePort === '80' || singlePort === '8080') {
+      setError({ msg: '系统策略：禁止添加 80 或 8080 端口的节点', type: 'error' });
+      return;
+    }
+
     if (isDuplicate(singleIp, singlePort)) { setError({ msg: `IP ${singleIp}:${singlePort} 已存在`, type: 'error' }); return; }
 
     onAdd([{ id: uuidv4(), ip: singleIp, port: singlePort, region: singleRegion, active: true }]);
@@ -45,23 +52,38 @@ export const IpInput: React.FC<IpInputProps> = ({ onAdd, existingEntries }) => {
     const parsed = parseBatchInput(batchText);
     const newEntries: IpEntry[] = [];
     let dups = 0;
+    let forbiddenPortsCount = 0;
 
     parsed.forEach(entry => {
+      // 忽略 80 和 8080 端口
+      if (entry.port === '80' || entry.port === '8080') {
+        forbiddenPortsCount++;
+        return;
+      }
+
       if (!isDuplicate(entry.ip, entry.port) && !newEntries.some(ne => ne.ip === entry.ip && ne.port === entry.port)) {
         newEntries.push(entry);
-      } else { dups++; }
+      } else { 
+        dups++; 
+      }
     });
 
-    if (newEntries.length === 0 && parsed.length > 0) { setError({ msg: '所有输入的 IP 都已存在。', type: 'error' }); return; }
+    if (newEntries.length === 0 && parsed.length > 0) { 
+      let msg = '没有有效的 IP 可导入。';
+      if (forbiddenPortsCount > 0) msg += ` (已过滤 ${forbiddenPortsCount} 个 80/8080 端口)`;
+      setError({ msg, type: 'error' }); 
+      return; 
+    }
+
     onAdd(newEntries);
     setBatchText('');
-    setError({ msg: `成功导入 ${newEntries.length} 条数据${dups > 0 ? `，忽略 ${dups} 条重复` : ''}`, type: 'success' });
-    setTimeout(() => setError(null), 3000);
+    const successMsg = `成功导入 ${newEntries.length} 条数据${dups > 0 ? `，忽略 ${dups} 条重复` : ''}${forbiddenPortsCount > 0 ? `，已自动忽略 ${forbiddenPortsCount} 个 80/8080 端口节点` : ''}`;
+    setError({ msg: successMsg, type: 'success' });
+    setTimeout(() => setError(null), 4000);
   };
 
   return (
     <div className="bg-white/40 backdrop-blur-xl rounded-[2.5rem] shadow-2xl shadow-slate-200/50 border border-white/80 overflow-hidden transition-all duration-500">
-      {/* 顶部导航切换 */}
       <div className="p-3 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between">
         <div className="flex bg-slate-200/50 rounded-2xl p-1 relative w-full sm:w-auto">
           <button
@@ -84,10 +106,9 @@ export const IpInput: React.FC<IpInputProps> = ({ onAdd, existingEntries }) => {
           </button>
         </div>
         
-        {/* 右侧指示 */}
         <div className="hidden sm:flex items-center space-x-3 text-[10px] font-black text-slate-300 uppercase tracking-widest px-4">
           <Monitor size={14} />
-          <span>解析引擎 v2.0 Ready</span>
+          <span>解析引擎 v2.1 (Port Filtered)</span>
         </div>
       </div>
 
@@ -124,9 +145,7 @@ export const IpInput: React.FC<IpInputProps> = ({ onAdd, existingEntries }) => {
           </form>
         ) : (
           <div className="space-y-8">
-            {/* 浅色编辑器容器 */}
             <div className="relative group rounded-3xl overflow-hidden border border-slate-200 bg-slate-50/50 focus-within:ring-4 focus-within:ring-indigo-50/50 transition-all shadow-inner">
-              {/* 行号栏 - 浅灰色 */}
               <div className="absolute left-0 top-0 bottom-0 w-12 bg-slate-100/50 border-r border-slate-200/50 flex flex-col items-center pt-5 space-y-2 select-none pointer-events-none">
                 {[1,2,3,4,5,6,7,8].map(n => <span key={n} className="text-[10px] font-mono font-bold text-slate-300">{n}</span>)}
               </div>
@@ -135,10 +154,9 @@ export const IpInput: React.FC<IpInputProps> = ({ onAdd, existingEntries }) => {
                 value={batchText}
                 onChange={e => setBatchText(e.target.value)}
                 className="w-full h-64 pl-16 pr-6 py-5 bg-transparent text-slate-700 border-none focus:ring-0 font-mono text-[14px] leading-relaxed placeholder:text-slate-300 resize-none selection:bg-indigo-100 outline-none"
-                placeholder={`在此粘贴包含 IP 的文本数据，例如：\n127.0.0.1:8080 #Localhost\n8.8.8.8:53 - 美国谷歌\n网页上直接复制的数据也可以识别...`}
+                placeholder={`在此粘贴包含 IP 的文本数据，例如：\n127.0.0.1:8080 #将被忽略\n8.8.8.8:53 - 美国谷歌\n网页上直接复制的数据也可以识别...`}
               />
 
-              {/* 悬浮操作 */}
               <div className="absolute right-4 top-4">
                 <button 
                   onClick={fillExample}
@@ -150,16 +168,15 @@ export const IpInput: React.FC<IpInputProps> = ({ onAdd, existingEntries }) => {
               </div>
             </div>
 
-            {/* 底部功能区 */}
             <div className="flex flex-col md:flex-row items-center justify-between gap-8 pt-2">
               <div className="flex items-start space-x-4 max-w-lg">
                 <div className="mt-1 p-2.5 bg-indigo-50 rounded-2xl text-indigo-500 shrink-0 shadow-sm border border-indigo-100/50">
                   <Sparkles size={16} />
                 </div>
                 <div>
-                  <h4 className="text-xs font-black text-slate-700 uppercase tracking-widest mb-1">AI 智能识别已就绪</h4>
+                  <h4 className="text-xs font-black text-slate-700 uppercase tracking-widest mb-1">AI 智能识别 (策略过滤开启)</h4>
                   <p className="text-[11px] leading-relaxed text-slate-400 font-medium italic">
-                    支持各种格式的模糊输入，系统将自动清洗重复项，并尝试从正文中为您抓取地理位置备注。
+                    支持各种格式的模糊输入，系统将自动清洗重复项，并根据安全策略<span className="text-indigo-600 font-bold">自动忽略 80/8080 端口</span>。
                   </p>
                 </div>
               </div>
