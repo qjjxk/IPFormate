@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { IpEntry } from './types';
 import { IpInput } from './components/IpInput';
 import { IpList } from './components/IpList';
-import { ShieldCheck, Loader2, ClipboardCheck, LayoutGrid, MapPinned, Trash2, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, Loader2, ClipboardCheck, LayoutGrid, MapPinned, Trash2, AlertTriangle, Filter } from 'lucide-react';
 import { fetchIpGeo } from './utils/geo';
 
 const STORAGE_KEY = 'ip-manager-pro-v1.1';
@@ -23,6 +22,7 @@ export default function App() {
   const [entries, setEntries] = useState<IpEntry[]>([INITIAL_FIXED_ENTRY]);
   const [copiedType, setCopiedType] = useState<'simple' | 'region' | null>(null);
   const [includeInactive, setIncludeInactive] = useState(false);
+  const [selectedRegion, setSelectedRegion] = useState<string>('ALL');
   const [isIdentifying, setIsIdentifying] = useState(false);
   const [isConfirmingClear, setIsConfirmingClear] = useState(false);
   
@@ -34,7 +34,6 @@ export default function App() {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          // 确保固定项始终存在且在第一位
           const others = parsed.filter(e => e.id !== FIXED_ID);
           setEntries([INITIAL_FIXED_ENTRY, ...others]);
         }
@@ -48,8 +47,24 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
   }, [entries]);
 
+  // 提取所有可用的地区列表
+  const availableRegions = useMemo(() => {
+    const regions = entries
+      .map(e => e.region)
+      .filter(r => r && !['待识别', '识别中...', '未知', 'FAIL', ''].includes(r));
+    return Array.from(new Set(regions)).sort();
+  }, [entries]);
+
+  // 计算当前显示的过滤后列表
+  const displayEntries = useMemo(() => {
+    return entries.filter(e => {
+      const activeFilter = includeInactive ? true : e.active;
+      const regionFilter = selectedRegion === 'ALL' || e.region === selectedRegion;
+      return activeFilter && regionFilter;
+    });
+  }, [entries, includeInactive, selectedRegion]);
+
   const handleIdentifyRegions = useCallback(async () => {
-    // 过滤掉固定项和已识别项
     const toIdentify = entries.filter(e => 
       !e.isLocked && (!e.region || ['待识别', '未知', '识别中...', 'FAIL', ''].includes(e.region))
     );
@@ -102,7 +117,6 @@ export default function App() {
         setIsConfirmingClear(false);
       }, 3000);
     } else {
-      // 清空时只保留固定项
       setEntries([INITIAL_FIXED_ENTRY]);
       setIsConfirmingClear(false);
       if (clearTimerRef.current) window.clearTimeout(clearTimerRef.current);
@@ -110,9 +124,8 @@ export default function App() {
   };
 
   const copyToClipboard = async (type: 'simple' | 'region') => {
-    // 核心修改：过滤掉所有 locked 的条目，不参与复制
-    const filteredEntries = entries.filter(e => !e.isLocked);
-    const targetEntries = includeInactive ? filteredEntries : filteredEntries.filter(e => e.active);
+    // 关键修改：仅复制 displayEntries 中非锁定的条目
+    const targetEntries = displayEntries.filter(e => !e.isLocked);
     
     if (targetEntries.length === 0) return;
 
@@ -194,11 +207,11 @@ export default function App() {
 
             {/* Toolbar */}
             <div className="sticky top-4 z-40">
-                <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center justify-between bg-white/95 backdrop-blur-md p-3 rounded-[1.5rem] border border-slate-200 shadow-xl shadow-slate-200/40">
+                <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-center justify-between bg-white/95 backdrop-blur-md p-3 rounded-[1.5rem] border border-slate-200 shadow-xl shadow-slate-200/40">
                     <button
                       onClick={handleIdentifyRegions}
                       disabled={isIdentifying}
-                      className={`flex-1 sm:flex-none flex items-center justify-center space-x-3 px-8 py-3.5 rounded-xl font-black text-sm transition-all shadow-md active:scale-95 ${
+                      className={`flex-1 lg:flex-none flex items-center justify-center space-x-3 px-8 py-3.5 rounded-xl font-black text-sm transition-all shadow-md active:scale-95 ${
                         isIdentifying 
                         ? "bg-indigo-50 text-indigo-400 cursor-wait animate-pulse border border-indigo-100" 
                         : needsIdentification 
@@ -210,12 +223,31 @@ export default function App() {
                       <span>{isIdentifying ? "智能轮询中..." : needsIdentification ? "智能识别地理位置" : "节点已全部识别"}</span>
                     </button>
 
-                    <div className="flex items-center justify-between sm:justify-end gap-5 px-4">
+                    <div className="flex flex-wrap items-center justify-center lg:justify-end gap-5 px-4">
+                      {/* Region Filter Dropdown */}
+                      <div className="flex items-center space-x-3 bg-slate-50/80 px-4 py-2 rounded-xl border border-slate-100">
+                        <Filter size={14} className="text-slate-400" />
+                        <select 
+                          value={selectedRegion} 
+                          onChange={(e) => setSelectedRegion(e.target.value)}
+                          className="bg-transparent text-xs font-black text-slate-600 uppercase tracking-widest outline-none cursor-pointer"
+                        >
+                          <option value="ALL">全部地区</option>
+                          {availableRegions.map(reg => (
+                            <option key={reg} value={reg}>{reg}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="h-4 w-px bg-slate-200 hidden sm:block" />
+
                       <div className="flex items-center space-x-2 text-slate-400">
                         <LayoutGrid size={15} />
-                        <span className="text-[10px] font-black uppercase tracking-[0.2em]">{entries.length} 负载就绪</span>
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em]">{displayEntries.length} 过滤匹配</span>
                       </div>
+
                       <div className="h-4 w-px bg-slate-200 hidden sm:block" />
+
                       <label className="flex items-center space-x-2 text-xs text-slate-500 cursor-pointer hover:text-indigo-600 transition-colors">
                         <input
                           type="checkbox"
@@ -230,7 +262,7 @@ export default function App() {
             </div>
 
             {/* List */}
-            <IpList entries={includeInactive ? entries : entries.filter(e => e.active)} setEntries={setEntries} />
+            <IpList entries={displayEntries} setEntries={setEntries} />
 
             <div className="flex justify-center pt-8 pb-16 relative z-[999]">
                <button
