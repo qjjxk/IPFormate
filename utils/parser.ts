@@ -66,7 +66,7 @@ export const parseBatchInput = (text: string): IpEntry[] => {
   /**
    * 引擎二：处理标准 IP:Port 格式 (Fallback)
    */
-  const standardPattern = /((?:\d{1,3}\.){3}\d{1,3}|\[?[a-fA-F0-9:]+\]?)[:|,]\s*(\d{2,5})/g;
+  const standardPattern = /((?:\d{1,3}\.){3}\d{1,3}|\[?[a-fA-F0-9:]+\]?)\s*[:|,]\s*(\d{2,5})/g;
   const matches = [];
   
   let stdMatch;

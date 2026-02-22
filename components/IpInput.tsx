@@ -154,7 +154,7 @@ export const IpInput: React.FC<IpInputProps> = ({ onAdd, existingEntries }) => {
                 value={batchText}
                 onChange={e => setBatchText(e.target.value)}
                 className="w-full h-64 pl-16 pr-6 py-5 bg-transparent text-slate-700 border-none focus:ring-0 font-mono text-[14px] leading-relaxed placeholder:text-slate-300 resize-none selection:bg-indigo-100 outline-none"
-                placeholder={`在此粘贴包含 IP 的文本数据，例如：\n127.0.0.1:8080 #将被忽略\n8.8.8.8:53 - 美国谷歌\n网页上直接复制的数据也可以识别...`}
+                placeholder={`在此粘贴包含 IP 的文本数据，例如：\n127.0.0.1:8080 #将被忽略\n8.8.8.8:53 - 美国谷歌\n203.239.100.72 , 2095\n网页上直接复制的数据也可以识别...`}
               />
 
               <div className="absolute right-4 top-4">
