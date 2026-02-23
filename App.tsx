@@ -22,7 +22,7 @@ export default function App() {
   const [entries, setEntries] = useState<IpEntry[]>([INITIAL_FIXED_ENTRY]);
   const [copiedType, setCopiedType] = useState<'simple' | 'region' | null>(null);
   const [includeInactive, setIncludeInactive] = useState(false);
-  const [selectedRegion, setSelectedRegion] = useState<string>('ALL');
+  const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
   const [isIdentifying, setIsIdentifying] = useState(false);
   const [isConfirmingClear, setIsConfirmingClear] = useState(false);
   
@@ -51,7 +51,7 @@ export default function App() {
   const availableRegions = useMemo(() => {
     const regions = entries
       .map(e => e.region)
-      .filter(r => r && !['待识别', '识别中...', '未知', 'FAIL', ''].includes(r));
+      .filter(r => r && !['待识别', '识别中...', '未知', 'FAIL', 'LOCAL', ''].includes(r));
     return Array.from(new Set(regions)).sort();
   }, [entries]);
 
@@ -59,10 +59,10 @@ export default function App() {
   const displayEntries = useMemo(() => {
     return entries.filter(e => {
       const activeFilter = includeInactive ? true : e.active;
-      const regionFilter = selectedRegion === 'ALL' || e.region === selectedRegion;
+      const regionFilter = selectedRegions.length === 0 || selectedRegions.includes(e.region);
       return activeFilter && regionFilter;
     });
-  }, [entries, includeInactive, selectedRegion]);
+  }, [entries, includeInactive, selectedRegions]);
 
   const handleIdentifyRegions = useCallback(async () => {
     const toIdentify = entries.filter(e => 
@@ -106,7 +106,12 @@ export default function App() {
   }, [entries, isIdentifying]);
 
   const handleAdd = useCallback((newEntries: IpEntry[]) => {
-    setEntries(prev => [...prev, ...newEntries.map(e => ({ ...e, region: e.region || '待识别' }))]);
+    setEntries(prev => {
+      const fixed = prev.filter(e => e.id === FIXED_ID);
+      const others = prev.filter(e => e.id !== FIXED_ID);
+      // 将新条目插入到固定条目之后，确保在第一页可见
+      return [...fixed, ...newEntries.map(e => ({ ...e, region: e.region || '待识别' })), ...others];
+    });
   }, []);
 
   const handleClearClick = () => {
@@ -224,19 +229,43 @@ export default function App() {
                     </button>
 
                     <div className="flex flex-wrap items-center justify-center lg:justify-end gap-5 px-4">
-                      {/* Region Filter Dropdown */}
-                      <div className="flex items-center space-x-3 bg-slate-50/80 px-4 py-2 rounded-xl border border-slate-100">
-                        <Filter size={14} className="text-slate-400" />
-                        <select 
-                          value={selectedRegion} 
-                          onChange={(e) => setSelectedRegion(e.target.value)}
-                          className="bg-transparent text-xs font-black text-slate-600 uppercase tracking-widest outline-none cursor-pointer"
+                      {/* Region Filter Multi-select */}
+                      <div className="flex flex-wrap items-center gap-2 max-w-md">
+                        <div className="flex items-center space-x-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
+                           <Filter size={12} className="text-slate-400" />
+                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">地区筛选</span>
+                        </div>
+                        
+                        <button
+                          onClick={() => setSelectedRegions([])}
+                          className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all border ${
+                            selectedRegions.length === 0 
+                            ? "bg-indigo-600 text-white border-indigo-600 shadow-sm" 
+                            : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300"
+                          }`}
                         >
-                          <option value="ALL">全部地区</option>
-                          {availableRegions.map(reg => (
-                            <option key={reg} value={reg}>{reg}</option>
-                          ))}
-                        </select>
+                          全部
+                        </button>
+
+                        {availableRegions.map(reg => (
+                          <button
+                            key={reg}
+                            onClick={() => {
+                              setSelectedRegions(prev => 
+                                prev.includes(reg) 
+                                ? prev.filter(r => r !== reg) 
+                                : [...prev, reg]
+                              );
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all border ${
+                              selectedRegions.includes(reg) 
+                              ? "bg-indigo-600 text-white border-indigo-600 shadow-sm" 
+                              : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300"
+                            }`}
+                          >
+                            {reg}
+                          </button>
+                        ))}
                       </div>
 
                       <div className="h-4 w-px bg-slate-200 hidden sm:block" />

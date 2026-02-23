@@ -1,4 +1,4 @@
-import React, { memo, useState, useMemo, useEffect } from 'react';
+import React, { memo, useState, useMemo, useEffect, useRef } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -185,7 +185,14 @@ export const IpList: React.FC<IpListProps> = ({ entries, setEntries }) => {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   
+  const prevLengthRef = useRef(entries.length);
+
   useEffect(() => {
+    if (entries.length > prevLengthRef.current) {
+      setCurrentPage(1);
+    }
+    prevLengthRef.current = entries.length;
+
     const maxPage = Math.max(1, Math.ceil(entries.length / ITEMS_PER_PAGE));
     if (currentPage > maxPage) {
       setCurrentPage(maxPage);
